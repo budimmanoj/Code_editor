@@ -1,46 +1,80 @@
-.participants { padding: 14px; }
-
-.part-section-label {
-  font-size: 9px; font-weight: 700; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--text2);
-  font-family: var(--font-mono); margin-bottom: 8px;
+.participants-list {
+  padding: 8px 0;
 }
 
-.room-id-row {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--bg3); border: 1px solid var(--line);
-  border-radius: var(--r); padding: 7px 10px;
+.participants-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
 }
-.room-id-text {
-  flex: 1; font-size: 11px; font-family: var(--font-mono); color: var(--text1);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.copy-btn {
-  font-size: 14px; color: var(--text2); cursor: pointer; transition: color .15s;
-  background: none; border: none; flex-shrink: 0;
-}
-.copy-btn:hover { color: var(--accent); }
 
-.part-list { display: flex; flex-direction: column; gap: 4px; }
-
-.part-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 6px; border-radius: var(--r);
-  transition: background .1s;
+.participants-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  font-family: var(--font-mono);
 }
-.part-row:hover { background: var(--bg4); }
 
-.part-avatar-wrap {
+.participants-count {
+  font-size: 11px;
+  background: var(--bg4);
+  color: var(--text2);
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.participants-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  padding: 6px 12px 4px;
+  font-family: var(--font-mono);
+}
+
+.participant-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  margin: 1px 6px;
+  transition: background 0.15s;
+}
+
+.participant-item:hover { background: var(--bg4); }
+.participant-item.me    { background: rgba(124, 58, 237, 0.08); }
+
+/* Avatar wrapper — holds avatar + online dot */
+.participant-avatar-wrap {
   position: relative;
   flex-shrink: 0;
 }
 
-.part-avatar {
-  width: 30px; height: 30px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 800; color: #000; font-family: var(--font-mono);
+.participant-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text0);
+  font-family: var(--font-mono);
+  box-sizing: border-box;
 }
 
+/* Online / offline presence dot */
 .presence-dot {
   position: absolute;
   bottom: -1px;
@@ -48,21 +82,43 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  border: 2px solid var(--bg2, #0d1117);
+  border: 2px solid var(--bg2);
 }
 
 .presence-dot.online  { background: #3fb950; }
-.presence-dot.offline { background: #484f58; }
+.presence-dot.offline { background: var(--bg5); }
 
-.part-info { flex: 1; min-width: 0; }
-.part-name  { display: block; font-size: 12px; font-weight: 600; color: var(--text0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.part-email { display: block; font-size: 10px; font-family: var(--font-mono); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.part-online {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent); flex-shrink: 0;
-  box-shadow: 0 0 6px var(--accent);
-  animation: blink 2.5s ease-in-out infinite;
+.participant-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
-.part-empty { font-size: 12px; font-family: var(--font-mono); color: var(--text2); padding: 8px 0; }
+.participant-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+
+.participant-email {
+  font-size: 10px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+
+.participants-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text2);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
