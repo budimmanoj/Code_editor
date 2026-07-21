@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { EditorView, keymap, lineNumbers, highlightActiveLine,
          highlightActiveLineGutter, drawSelection, dropCursor,
          rectangularSelection, crosshairCursor } from '@codemirror/view';
-import { EditorState, EditorSelection } from '@codemirror/state';
+import { EditorState } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';

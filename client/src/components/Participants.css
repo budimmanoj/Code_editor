@@ -30,11 +30,29 @@
 }
 .part-row:hover { background: var(--bg4); }
 
+.part-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .part-avatar {
-  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  width: 30px; height: 30px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; font-weight: 800; color: #000; font-family: var(--font-mono);
 }
+
+.presence-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--bg2, #0d1117);
+}
+
+.presence-dot.online  { background: #3fb950; }
+.presence-dot.offline { background: #484f58; }
 
 .part-info { flex: 1; min-width: 0; }
 .part-name  { display: block; font-size: 12px; font-weight: 600; color: var(--text0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

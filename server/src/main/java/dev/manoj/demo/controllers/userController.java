@@ -12,25 +12,27 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/users")
-public class userController {
+public class UserController {
 
     private final UserService userService;
 
-    public userController(UserService userService) {
+    public UserController(UserService userService) {
         this.userService = userService;
     }
 
+    /** POST /api/users/register */
     @PostMapping("/register")
     public AuthResponseDto register(@RequestBody RegisterUserDto dto) {
         return userService.register(dto);
     }
 
+    /** POST /api/users/login — returns JWT */
     @PostMapping("/login")
     public AuthResponseDto login(@RequestBody Map<String, String> body) {
         return userService.login(body.get("email"), body.get("password"));
     }
 
-    /** GET /api/users/me — returns profile of the logged-in user */
+    /** GET /api/users/me — profile of the logged-in user */
     @GetMapping("/me")
     public UserProfileDto getMyProfile(Authentication auth) {
         UUID userId = (UUID) auth.getPrincipal();

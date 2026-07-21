@@ -1,80 +1,267 @@
-# CodeRoom: AI-Powered Collaborative Code Workspace
+# CodeRoom — Real-Time Collaborative Code Editor
 
-CodeRoom is a modern, real-time collaborative code editor with a built-in AI assistant. It allows multiple developers to work on the same codebase simultaneously while leveraging the power of generative AI to improve code quality and speed up development.
+> A production-quality, full-stack collaborative code editor built with **Spring Boot**, **React**, **WebSockets**, and **Gemini AI**.
 
-## 🚀 Key Features
+---
 
-### 💻 Real-Time Collaboration
-- **Live Sync**: Multiple users can edit the same file in real-time with ultra-low latency via WebSockets.
-- **Presence & Cursors**: See who is online in the room and view live typing indicators.
-- **Workspace Explorer**: Manage files and folders with a fully functional file tree. Upload entire directories or individual files directly into the workspace.
-- **Version History**: The platform automatically saves snapshots of code. View previous versions and easily revert changes.
+## ✨ Features
 
-### 🤖 Built-in AI Assistant (Powered by Gemini)
-The IDE features a dedicated AI Panel that acts as your pair programmer. Available features include:
-1. **Review**: Analyze code for bugs, logic errors, and best practices.
-2. **Explain**: Get plain-english explanations of complex code snippets.
-3. **Refactor**: Automatically restructure code to improve readability and maintainability.
-4. **Debug**: Paste stack traces to identify root causes and get fixed code.
-5. **Optimize**: Enhance performance and reduce algorithmic complexity.
-6. **Generate**: Create boilerplate, specific functions, or algorithms from natural language prompts.
-7. **Tests**: Automatically generate unit tests (e.g., JUnit, Jest, PyTest) for your code.
-8. **Docs**: Generate JSDoc, JavaDoc, or Python docstrings.
-9. **Commit Msg**: Automatically generate conventional Git commit messages based on recent changes.
-10. **Security**: Scan your code for common vulnerabilities (SQLi, XSS, etc.).
-11. **Chat**: Ask general programming questions with your current file used as context.
-12. **Review Before Save**: Get a comprehensive pre-commit AI review before persisting major changes.
+### Real-Time Collaboration
+- **Live code sync** — changes broadcast instantly via WebSocket (no polling)
+- **Typing indicators** — see who is editing right now
+- **Presence system** — live online/offline status for every participant
+- **Cursor colors** — each user gets a unique cursor color in the participants panel
 
-### 🔐 Security & Access Control
-- **Role-based Access**: Room creators become `ADMIN`s and can manage code versions and participant access.
-- **JWT Authentication**: Secure user login and registration system.
-- **Safe WebSockets**: WebSocket connections are secured and validated via JWT tokens.
+### Code Editor
+- **CodeMirror 6** with syntax highlighting for 10+ languages (JavaScript, Python, Java, C++, Rust, HTML, CSS, TypeScript, SQL, Markdown)
+- **Auto-complete**, **bracket matching**, **code folding**
+- **Find & replace** (`Ctrl+F`)
+- **Keyboard shortcuts** (`Ctrl+S` to save, `Ctrl+\`` for AI panel)
+- **Tab ↔ spaces**, indent on input
 
-## 🛠️ Technology Stack
+### AI Assistant (Gemini)
+- **Explain** — plain-language explanation of any code
+- **Refactor** — improve code quality automatically
+- **Debug** — diagnose errors with optional stack trace
+- **Generate** — generate code from a natural-language prompt
+- **Review** — comprehensive bug and security review before saving
+- **Tests** — auto-generate unit tests
+- **Optimize** — performance improvements
+- **Docs** — generate JSDoc / docstrings
+- **Commit Message** — generate a Git commit message
+- **Security Scan** — dedicated OWASP-style vulnerability scan
+- **Chat** — free-form conversation with your code as context
 
-**Frontend:**
-- React
-- CodeMirror 6 (with rich extensions for autocompletion, syntax highlighting, bracket matching, and search)
-- Vanilla CSS with a sleek, dark IDE aesthetic
-- Custom WebSocket Client
+### Workspace Management
+- **File tree** — create, rename, delete, nested folders
+- **Upload files or entire folders** (binary files automatically skipped)
+- **Download** individual files or the entire workspace as a **ZIP**
+- **Version history** — every save creates a snapshot; revert to any version
+- **Admin review workflow** — admins can mark versions REVIEWED or NO_CHANGE
 
-**Backend:**
-- Java 21 & Spring Boot 3.3.0
-- Spring Security (JWT)
-- Spring WebSocket
-- PostgreSQL (Database)
-- Native JDK `HttpClient` for seamless integration with the Gemini API
+### Rooms
+- Create rooms with a unique 8-character **invite code**
+- Share the invite code; teammates join instantly
+- Role-based access: **ADMIN** vs **MEMBER**
+- Profile page shows all your rooms
 
-## 🚦 Getting Started
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────┐
+│            React Client          │  Port 3000
+│  CodeMirror 6 + WebSocket client │
+└──────────┬──────────────────────┘
+           │  REST /api/*  +  WebSocket /ws/room/{id}
+           ▼
+┌─────────────────────────────────┐
+│        Spring Boot Server        │  Port 8080
+│  JPA + Security + WS Handler    │
+│  Gemini AI via JDK HttpClient   │
+└──────────┬──────────────────────┘
+           │  JDBC
+           ▼
+┌─────────────────────────────────┐
+│           PostgreSQL             │  Port 5432
+└─────────────────────────────────┘
+```
+
+### WebSocket Protocol
+
+All messages are JSON with a `type` field:
+
+| Direction | Type | Description |
+|-----------|------|-------------|
+| Server → Client | `PRESENCE_INIT` | List of already-connected users when you join |
+| Server → Client | `USER_JOINED` | A participant connected |
+| Server → Client | `USER_LEFT` | A participant disconnected |
+| Client → Server | `CODE_UPDATE` | Send a code change (debounced 500 ms) |
+| Server → Other Clients | `CODE_UPDATE` | Broadcast the change |
+| Client → Server | `CURSOR_UPDATE` | Cursor position {line, col} |
+| Server → Other Clients | `CURSOR_UPDATE` | Broadcast cursor position |
+| Client → Server | `TYPING` | Typing started/stopped |
+| Server → Other Clients | `TYPING` | Broadcast typing status |
+
+The server auto-saves code to PostgreSQL 3 seconds after the last `CODE_UPDATE`.
+
+---
+
+## 🚀 Quick Start (Local Dev)
 
 ### Prerequisites
-- Node.js (v18+)
-- Java 21
-- PostgreSQL running locally
-- Gemini API Key
+- **Java 21** (`java -version`)
+- **Maven 3.9+** (`mvn -version`)
+- **Node.js 18+** (`node -version`)
+- **PostgreSQL 15+** running locally
 
-### Backend Setup
-1. Navigate to the `server` directory.
-2. Ensure your PostgreSQL database is running and credentials match your `application.properties`.
-3. Set your Gemini API key in your environment variables:
-   ```bash
-   export GEMINI_API_KEY=your_api_key_here
-   ```
-4. Run the Spring Boot application.
+### 1. Database setup
 
-### Frontend Setup
-1. Navigate to the `client` directory.
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm start
-   ```
+```sql
+CREATE DATABASE coder_editor;
+```
 
-Open your browser to `http://localhost:3000` to start collaborating!
+### 2. Configure environment
 
-## 📦 Project Structure
-- `/client`: React frontend application containing the editor UI, file tree, AI panel, and API services.
-- `/server`: Spring Boot backend handling REST endpoints, WebSocket connections, database interactions, and AI prompt orchestration.
+```bash
+cp .env.example .env
+# Edit .env — set DB_PASSWORD and GEMINI_API_KEY at minimum
+```
+
+Or just set environment variables directly in your shell.
+
+### 3. Start the backend
+
+```bash
+cd server
+# Set env vars (or they will use defaults from application.properties)
+$env:GEMINI_API_KEY="your-key-here"   # Windows PowerShell
+mvn spring-boot:run
+```
+
+Backend starts on **http://localhost:8080**  
+Swagger UI: **http://localhost:8080/swagger-ui.html**
+
+### 4. Start the frontend
+
+```bash
+cd client
+npm install
+npm start
+```
+
+Frontend starts on **http://localhost:3000**
+
+---
+
+## 🐳 Docker (Recommended)
+
+The easiest way to run the full stack:
+
+```bash
+# 1. Copy and configure environment
+cp .env.example .env
+# Edit .env — set DB_PASSWORD and GEMINI_API_KEY
+
+# 2. Start everything
+docker-compose up --build
+
+# 3. Open the app
+# http://localhost:3000
+```
+
+Services:
+| Service | URL |
+|---------|-----|
+| React App | http://localhost:3000 |
+| Spring Boot API | http://localhost:8080 |
+| Swagger UI | http://localhost:8080/swagger-ui.html |
+| PostgreSQL | localhost:5432 |
+
+To stop: `docker-compose down`  
+To wipe data: `docker-compose down -v`
+
+---
+
+## ⚙️ Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_URL` | `jdbc:postgresql://localhost:5432/coder_editor` | JDBC connection string |
+| `DB_USER` | `postgres` | Database username |
+| `DB_PASSWORD` | `hema143` | Database password (**change in prod!**) |
+| `JWT_SECRET` | *(long default)* | JWT signing secret (≥ 32 chars, **change in prod!**) |
+| `JWT_EXPIRATION_MS` | `86400000` | Token lifetime in ms (24h) |
+| `GEMINI_API_KEY` | *(empty)* | Gemini API key — AI features disabled if blank |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model to use |
+| `CORS_ORIGINS` | `http://localhost:3000,...` | Comma-separated allowed origins |
+| `PORT` | `8080` | Server port |
+
+---
+
+## 📁 Project Structure
+
+```
+codeEditor/
+├── docker-compose.yml
+├── .env.example
+├── server/                     # Spring Boot (Java 21)
+│   ├── Dockerfile
+│   ├── pom.xml
+│   └── src/main/java/dev/manoj/demo/
+│       ├── ai/                 # Gemini AI integration
+│       │   ├── AiProvider.java
+│       │   ├── GeminiProvider.java
+│       │   └── AiService.java
+│       ├── controllers/        # REST + AI controllers
+│       ├── websocket/          # WS handler, JWT interceptor, config
+│       ├── service/            # Business logic
+│       ├── model/              # JPA entities
+│       ├── dto/                # Request/response DTOs
+│       ├── security/           # JWT auth filter, config
+│       └── repository/         # Spring Data JPA repos
+└── client/                     # React (CRA)
+    ├── Dockerfile
+    ├── nginx.conf
+    └── src/
+        ├── api/
+        │   └── client.js       # REST + WS base URLs
+        ├── websocket/
+        │   └── RoomSocket.js   # WebSocket client
+        ├── components/
+        │   ├── CodeEditor.jsx  # CodeMirror 6 editor
+        │   ├── AiPanel.jsx     # Tabbed AI assistant panel
+        │   ├── FileTree.jsx    # File explorer
+        │   └── Participants.jsx # Live presence panel
+        └── pages/
+            ├── AuthPage.jsx    # Login / register
+            ├── LobbyPage.jsx   # Room create/join/profile
+            └── EditorPage.jsx  # Main workspace
+```
+
+---
+
+## 🔑 Getting a Gemini API Key
+
+1. Go to **https://aistudio.google.com/app/apikey**
+2. Click **Create API Key**
+3. Copy the key and set `GEMINI_API_KEY=your-key` in `.env`
+4. Restart the server
+
+AI features will gracefully show an error message if the key is not set.
+
+---
+
+## 🛡️ Security Notes
+
+- JWT tokens are **stateless** — no server-side session storage
+- WebSocket authentication is done via JWT **query parameter** during the upgrade handshake (browsers cannot send custom headers during WS upgrades)
+- Passwords are hashed with **BCrypt**
+- All workspace endpoints validate room membership before serving data
+- PostgreSQL null bytes (`\u0000`) are stripped before storage to prevent JDBC errors
+- CORS is configurable via `cors.allowed-origins`
+
+---
+
+## 📝 API Reference
+
+Full interactive docs at **http://localhost:8080/swagger-ui.html** when the server is running.
+
+Key endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/users/register` | Create account |
+| `POST` | `/api/users/login` | Login, returns JWT |
+| `POST` | `/api/rooms/create` | Create a room |
+| `POST` | `/api/rooms/join` | Join via invite code |
+| `GET` | `/api/workspace/{roomId}/fileTree` | Get file tree |
+| `GET` | `/api/workspace/{roomId}/fileNode/{id}` | Get file content |
+| `PUT` | `/api/code/update` | Save file content |
+| `GET` | `/api/code/versions/{roomId}/{fileId}` | Version history |
+| `POST` | `/api/ai/explain` | AI: explain code |
+| `POST` | `/api/ai/refactor` | AI: refactor code |
+| `POST` | `/api/ai/review` | AI: code review |
+| `POST` | `/api/ai/chat` | AI: free-form chat |
+| `WS` | `/ws/room/{roomId}?token=JWT` | WebSocket connection |
