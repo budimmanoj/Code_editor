@@ -1,0 +1,141 @@
+.ft-wrap { padding: 6px 0; }
+
+.ft-node {}
+
+.ft-row {
+  display: flex; align-items: center; gap: 6px;
+  height: 28px; padding-right: 6px;
+  cursor: pointer; border-radius: 4px; margin: 1px 4px;
+  font-size: 12.5px; font-family: var(--font-mono);
+  color: var(--text1); position: relative;
+  transition: background .1s, color .1s;
+}
+.ft-row:hover { background: var(--bg4); color: var(--text0); }
+.ft-row.selected { background: var(--accent-dim); color: var(--accent); }
+.ft-row.selected .ft-name { color: var(--accent); }
+
+.ft-arrow {
+  font-size: 14px; color: var(--text2); transition: transform .15s;
+  width: 12px; display: inline-block; text-align: center;
+}
+.ft-arrow.open { transform: rotate(90deg); }
+
+.ft-icon { font-size: 12px; flex-shrink: 0; }
+.ft-folder { filter: none; }
+
+.ft-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ft-lang {
+  font-size: 9px; color: var(--text2); font-family: var(--font-mono);
+  background: var(--bg5); padding: 1px 5px; border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.ft-actions {
+  display: flex; gap: 4px; flex-shrink: 0;
+  opacity: 0; visibility: hidden;
+  transform: translateX(5px) scale(0.95);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ft-row:hover .ft-actions { 
+  opacity: 1; visibility: visible;
+  transform: translateX(0) scale(1);
+}
+
+.ft-action-btn {
+  display: flex; align-items: center; justify-content: center; gap: 2px;
+  font-size: 10px; font-family: var(--font-mono); font-weight: 800;
+  padding: 3px 6px; border-radius: 4px;
+  border: 1px solid var(--line); background: var(--bg3);
+  cursor: pointer; transition: all .2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.ft-action-btn .icon { font-size: 11px; filter: grayscale(0.4); transition: all .2s; }
+.ft-action-btn .plus { font-size: 10px; font-weight: 900; }
+
+.ft-action-btn.add-file { color: #38bdf8; border-color: rgba(56, 189, 248, 0.2); background: rgba(56, 189, 248, 0.05); }
+.ft-action-btn.add-file:hover { 
+  color: #fff; background: #38bdf8; border-color: #38bdf8;
+  box-shadow: 0 4px 10px rgba(56, 189, 248, 0.4);
+  transform: translateY(-1px);
+}
+.ft-action-btn.add-file:hover .icon { filter: grayscale(0) brightness(200%); }
+
+.ft-action-btn.add-folder { color: #eab308; border-color: rgba(234, 179, 8, 0.2); background: rgba(234, 179, 8, 0.05); }
+.ft-action-btn.add-folder:hover { 
+  color: #000; background: #eab308; border-color: #eab308;
+  box-shadow: 0 4px 10px rgba(234, 179, 8, 0.4);
+  transform: translateY(-1px);
+}
+.ft-action-btn.add-folder:hover .icon { filter: grayscale(0) brightness(0%); }
+
+.ft-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 120px; gap: 12px;
+  font-size: 12px; font-family: var(--font-mono); color: var(--text2);
+}
+.ft-create-btn {
+  font-size: 12px; color: #000; font-family: var(--font-mono); font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), #0dcaf0);
+  border: none;
+  padding: 6px 14px; border-radius: 6px; cursor: pointer;
+  transition: all .25s ease;
+  box-shadow: 0 4px 10px rgba(0, 229, 160, 0.2);
+}
+.ft-create-btn:hover { 
+  box-shadow: 0 6px 14px rgba(0, 229, 160, 0.4); 
+  transform: translateY(-1px);
+}
+.ft-create-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 5px rgba(0, 229, 160, 0.2);
+}
+
+/* ── Rename input ──────────────────────────────────────── */
+.ft-rename-input {
+  flex: 1; background: var(--bg0);
+  border: 1px solid var(--accent); border-radius: 3px;
+  color: var(--text0); font-size: 12px; font-family: var(--font-mono);
+  padding: 1px 5px; outline: none;
+  min-width: 0;
+}
+
+/* ── Rename & Delete action buttons ───────────────────── */
+.ft-action-btn.rename-btn {
+  color: #a78bfa; border-color: rgba(167,139,250,.2);
+  background: rgba(167,139,250,.05);
+  font-size: 13px; font-weight: 700; padding: 2px 6px;
+}
+.ft-action-btn.rename-btn:hover {
+  color: #fff; background: #a78bfa; border-color: #a78bfa;
+  box-shadow: 0 4px 10px rgba(167,139,250,.4);
+  transform: translateY(-1px);
+}
+.ft-action-btn.delete-btn {
+  color: #f87171; border-color: rgba(248,113,113,.2);
+  background: rgba(248,113,113,.05);
+  font-size: 10px; font-weight: 900; padding: 2px 6px;
+}
+.ft-action-btn.delete-btn:hover {
+  color: #fff; background: #f87171; border-color: #f87171;
+  box-shadow: 0 4px 10px rgba(248,113,113,.4);
+  transform: translateY(-1px);
+}
+
+/* ── Root-level quick add buttons ─────────────────────── */
+.ft-root-actions {
+  display: flex; gap: 6px;
+  padding: 6px 10px 4px 10px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+.ft-root-btn {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; color: var(--text2);
+  background: var(--bg3); border: 1px solid var(--line);
+  border-radius: 4px; padding: 3px 8px; cursor: pointer;
+  font-family: var(--font-mono); transition: all .15s;
+}
+.ft-root-btn:hover { background: var(--bg4); color: var(--text0); }
+
+.ft-virtual-root { padding: 0; }

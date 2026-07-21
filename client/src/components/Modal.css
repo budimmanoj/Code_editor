@@ -1,0 +1,28 @@
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.7); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn .15s ease;
+}
+
+.modal-box {
+  width: 360px;
+  background: var(--bg3);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-lg);
+  padding: 28px;
+  animation: slideUp .2s cubic-bezier(.16,1,.3,1);
+  box-shadow: 0 24px 60px rgba(0,0,0,.6);
+}
+
+.modal-title {
+  font-size: 15px; font-weight: 700; color: var(--text0);
+  margin-bottom: 22px; font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.modal-field { margin-bottom: 16px; }
+
+.modal-actions {
+  display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px;
+}
