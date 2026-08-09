@@ -291,30 +291,126 @@
   flex: 1; 
   min-height: 0; 
   overflow: hidden;
+  /* Isolate CodeMirror repaints — prevents layout thrash from bubbling up */
+  contain: strict;
 }
 
-/* ── EMPTY STATE ────────────────────────────────────────────── */
+/* ── EMPTY STATE & DROPZONE ──────────────────────────────────── */
 .empty-editor {
-  flex: 1; 
-  display: flex; 
+  flex: 1;
+  display: flex;
   flex-direction: column;
-  align-items: center; 
-  justify-content: center; 
-  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  position: relative;
+  transition: background .15s;
 }
-.empty-icon  { 
-  color: var(--text1); 
+
+/* Dashed border ring that appears when nothing is dragged in yet */
+.dropzone {
+  border: 2px dashed transparent;
+  border-radius: var(--r-lg);
+  margin: 16px;
+  transition: border-color .15s, background .15s;
+}
+
+/* User is hovering a drag over the zone */
+.dropzone.drag-active {
+  border-color: var(--accent);
+  background: rgba(199, 243, 107, 0.04);
+}
+
+.empty-icon {
+  color: var(--text2);
   opacity: 0.5;
 }
-.empty-title { 
-  font-size: 16px; 
-  font-weight: 500; 
-  color: var(--text1); 
+.empty-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text1);
 }
-.empty-sub { 
-  font-size: 14px; 
-  color: var(--text2); 
+.empty-sub {
+  font-size: 13px;
+  color: var(--text2);
+  text-align: center;
+  max-width: 320px;
+  line-height: 1.5;
 }
+
+.empty-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.dropzone-hint {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+
+.dropzone-drag-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+/* ── UPLOAD PROGRESS ──────────────────────────────────────────── */
+.upload-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 280px;
+}
+
+.upload-progress-icon {
+  color: var(--accent);
+}
+
+@keyframes upload-pulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .6; transform: scale(0.95); }
+}
+.upload-spin-icon {
+  animation: upload-pulse 1.2s ease infinite;
+}
+
+.upload-progress-label {
+  font-size: 13px;
+  color: var(--text1);
+  font-family: var(--font-mono);
+}
+
+.upload-progress-bar-track {
+  width: 100%;
+  height: 4px;
+  background: var(--bg4);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.upload-progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width .3s ease;
+  box-shadow: 0 0 8px rgba(199, 243, 107, 0.4);
+  will-change: width;
+}
+
+.upload-progress-count {
+  font-size: 12px;
+  color: var(--text2);
+  font-family: var(--font-mono);
+}
+
 
 /* ── OTHER MODALS/PANELS ──────────────────────────────────────────── */
 
@@ -365,4 +461,4 @@
 .confirm-actions { display: flex; justify-content: flex-end; gap: 12px; }
 
 .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-.toast { background: var(--bg2); border: 1px solid var(--line); color: var(--text0); padding: 12px 16px; border-radius: var(--r); font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); animation: slideUp 0.3s ease; }
+.toast { background: var(--bg2); border: 1px solid var(--line); color: var(--text0); padding: 12px 16px; border-radius: var(--r); font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); animation: slideUp 0.3s ease; will-change: transform; }

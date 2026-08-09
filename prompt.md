@@ -1,329 +1,828 @@
-AI-Powered Developer Assistant
+Implement a **Code Change Approval + Version History + Real-Time WebSocket Synchronization** workflow in the existing CodeRoom application.
 
-Implement a modular AI assistant integrated directly into the editor.
+The application already has:
 
-The AI should be optional and accessible through dedicated buttons, a side panel, or a floating assistant so it never interrupts normal coding.
+* React frontend
+* Spring Boot backend
+* PostgreSQL
+* WebSockets
+* JWT authentication
+* File/folder management
+* Version history
+* Real-time collaborative editing
 
-The AI architecture must be provider-agnostic so different LLMs (Gemini, OpenAI, Claude, Ollama, etc.) can be plugged in by simply changing the backend configuration.
+Do NOT rewrite the existing architecture unnecessarily. First inspect the existing implementation and integrate this feature cleanly with the current code.
 
-Use streaming responses where possible.
+---
 
-AI Features
+# PART 1 — Code Change Approval Workflow
 
-Implement the following AI capabilities.
+## Goal
 
-1. AI Code Review
+When a normal user modifies code in a workspace, the change must be stored as a **pending revision** and must be reviewed by an administrator before becoming the officially approved version.
 
-Add a "Review Code" button.
+The core flow must be:
 
-When clicked:
+```text
+User edits code
+      ↓
+Create new revision
+      ↓
+Revision = PENDING
+      ↓
+Store in PostgreSQL
+      ↓
+Admin logs in
+      ↓
+Admin opens History / Pending Reviews
+      ↓
+Admin reviews diff
+      ↓
+Approve OR Reject
+      ↓
+If approved → becomes current approved version
+If rejected → previous approved version remains current
+```
 
-Analyze the currently opened file.
-Detect
-bad coding practices
-code smells
-duplicated logic
-security issues
-performance problems
-naming issues
-readability
-maintainability
-Display suggestions in a side panel.
-Allow users to accept or ignore each suggestion.
-2. AI Debugger
+---
 
-Add a "Debug" button.
+# PART 2 — Do NOT overwrite the approved code
 
-The AI should
+This is extremely important.
 
-analyze compile/runtime errors
-explain the error in simple language
-identify probable root causes
-highlight the problematic code
-suggest fixes
-generate corrected code
+Do NOT simply do:
 
-If stack traces are available, analyze them automatically.
+```text
+files.content = newCode
+```
 
-3. Explain Code
+when a normal user edits a file.
 
-Add an "Explain" button.
+Instead, introduce/extend a versioning model.
 
-When users select code,
+Inspect the existing database schema first.
 
-the AI explains
+Prefer a structure conceptually like:
 
-what the code does
-time complexity
-space complexity
-algorithm
-logic flow
-potential improvements
-4. Optimize Code
+### files
 
-Add an "Optimize" button.
+```text
+id
+name
+folder_id
+current_version_id
+...
+```
 
-The AI should
+### file_versions
 
-reduce complexity
-improve readability
-improve performance
-suggest modern language features
-simplify nested logic
+```text
+id
+file_id
+version_number
+content
+created_by
+created_at
+status
+reviewed_by
+reviewed_at
+review_comment
+```
 
-Provide a side-by-side comparison before applying changes.
+Statuses:
 
-5. Generate Documentation
+```text
+PENDING
+APPROVED
+REJECTED
+```
 
-Add a "Generate Docs" button.
+Adapt the exact schema to the existing project rather than blindly creating duplicate tables.
 
-Automatically generate
+---
 
-function documentation
-JavaDoc
-API descriptions
-README sections
-inline comments
-6. Bug Detection
+# PART 3 — User edits
 
-Implement continuous bug detection.
+When a normal user changes:
 
-When the user clicks Analyze Code
+```text
+Main.java
+```
 
-AI checks for
+create a new version:
 
-null pointer risks
-index out of bounds
-infinite loops
-race conditions
-SQL injection
-XSS
-unsafe API usage
-memory leaks
-concurrency issues
+```text
+Version 11
+Status = PENDING
+Created by = current user
+```
 
-Display severity levels.
+The currently approved version must remain untouched.
 
-7. Fix with AI
+Example:
 
-Whenever AI detects an issue,
+```text
+Main.java
 
-display
+Version 10
+✓ APPROVED
+System.out.println("Hello");
 
-⚠ Problem Found
+Version 11
+⏳ PENDING
+System.out.println("Hello World");
+```
 
-Explanation
+The database must clearly distinguish:
 
-[Fix Automatically]
+```text
+Current approved version
+```
 
-[Ignore]
+from:
 
-[Show Reason]
+```text
+Pending user changes
+```
 
-If the user clicks Fix Automatically
+---
 
-generate a patch
+# PART 4 — History UI
 
-preview changes
+Extend the existing History feature.
 
-allow Accept or Reject.
+When Admin opens History/Pending Reviews, show:
 
-8. AI Chat Assistant
+```text
+Main.java
 
-Include an AI chat panel.
+Version 11
+Status: Pending Review
+Changed by: User
+Created: <timestamp>
 
-Users can ask
+[Review Changes]
+```
 
-Explain this function
-Why is this code failing?
-Generate unit tests
-Improve this API
-Refactor this class
-Convert Java to Python
-Explain SQL query
-Explain regex
-Generate documentation
+When the admin opens the revision, display a proper code diff.
 
-The chat should automatically include the currently opened file as context.
+For example:
 
-9. AI Code Completion
+```text
+- System.out.println("Hello");
++ System.out.println("Hello World");
+```
 
-Implement optional AI autocomplete.
+Clearly distinguish:
 
-While typing,
+* Added lines
+* Removed lines
+* Unchanged lines
 
-allow users to press
+Use the existing editor/diff components if available.
 
-Ctrl + Space
+---
 
-to request
+# PART 5 — Admin approval
 
-next line prediction
-function completion
-boilerplate generation
-10. Generate Unit Tests
+Only users with the ADMIN role can approve or reject changes.
 
-Add a button
+The backend MUST enforce this.
 
-Generate Tests
+Do not rely only on hiding buttons in React.
 
-Generate
+Create/extend backend APIs such as:
 
-JUnit tests
-React Testing Library tests
-edge cases
-assertions
-mocks
-11. Commit Message Generator
+```text
+GET  /api/reviews/pending
+GET  /api/reviews/{revisionId}
+POST /api/reviews/{revisionId}/approve
+POST /api/reviews/{revisionId}/reject
+GET  /api/files/{fileId}/history
+```
 
-After code changes,
+Adapt the endpoints to the existing API conventions.
 
-AI can generate
+---
 
-feat:
+## Approve
 
-fix:
+When Admin clicks:
 
-refactor:
+```text
+Approve
+```
 
-docs:
+perform the operation transactionally:
 
-test:
+```text
+Pending version
+      ↓
+STATUS = APPROVED
+      ↓
+files.current_version_id = approved version
+      ↓
+Record reviewer + timestamp
+```
 
-style commit messages.
+Only after successful database commit should the system notify connected clients.
 
-12. README Generator
+---
 
-Generate project documentation automatically from the workspace.
+## Reject
 
-13. Smart Error Assistant
+When Admin clicks:
 
-Whenever compilation fails,
+```text
+Reject
+```
 
-automatically show
+the revision becomes:
 
-What happened
+```text
+STATUS = REJECTED
+```
 
-Why it happened
+and the previous approved version remains the current approved version.
 
-How to fix it
+Allow the admin to provide an optional rejection comment.
 
-Suggested code
-14. AI Refactor
+Example:
 
-Allow users to select code and choose
+```text
+Rejected
 
-Extract Method
-Rename Variables
-Split Large Function
-Remove Duplicate Code
-Apply SOLID principles
-Improve Design Patterns
-15. Security Scanner
+Reason:
+"Please handle null input before submitting."
+```
 
-Add
+---
 
-Scan Security
+# PART 6 — WebSocket behavior
 
-AI checks for
+The existing application uses WebSockets for real-time collaboration.
 
-SQL Injection
-XSS
-CSRF
-JWT misuse
-insecure authentication
-hardcoded secrets
-exposed API keys
-insecure dependencies
-16. Complexity Analyzer
+Do NOT break the current WebSocket behavior.
 
-Analyze
+We need to verify and, if necessary, fix synchronization.
 
-Cyclomatic Complexity
-Code Duplication
-Maintainability Index
-Performance Bottlenecks
+The desired behavior is:
 
-Display a report.
+```text
+User A
+Port 3000
+      │
+      │ edits Main.java
+      ↓
+WebSocket
+      ↓
+Spring Boot
+      ↓
+WebSocket
+      ↓
+User B
+Port 3001
+```
 
-17. AI Architecture Advisor
+User B must see User A's changes in real time.
 
-Analyze the entire project and suggest
+---
 
-folder improvements
-package restructuring
-design patterns
-dependency cleanup
-modularization
-UI
+# PART 7 — VERY IMPORTANT: Test with TWO separate users
 
-Design a professional IDE-like interface.
+After implementation, perform an actual multi-client WebSocket test.
 
-Toolbar:
+Use:
 
-Save
+```text
+Browser/Client 1
+Port: 3000
+Account: User A
+```
 
-Review Code
+and:
 
-Debug
+```text
+Browser/Client 2
+Port: 3001
+Account: User B
+```
 
-Explain
+Both users must enter the SAME room/workspace.
 
-Optimize
+Do not use the same account in both clients.
 
-Generate Docs
+Use two separate authenticated accounts.
 
-Generate Tests
+---
 
-Security Scan
+# PART 8 — WebSocket test scenario
 
-Analyze
+Perform this exact test:
 
-AI Chat
+### Step 1
 
-Each feature should open inside a collapsible right-side panel.
+Start the backend.
 
-Backend Architecture
+Start frontend instance 1 on:
 
-Implement an AI service layer.
+```text
+http://localhost:3000
+```
 
-AIController
+Login as:
 
-AIService
+```text
+User A
+```
 
-PromptBuilder
+Join the same workspace/room.
 
-ContextBuilder
+---
 
-LLMProvider
+### Step 2
 
-GeminiProvider
+Start another frontend instance on:
 
-OpenAIProvider
+```text
+http://localhost:3001
+```
 
-ClaudeProvider
+Login as:
 
-OllamaProvider
+```text
+User B
+```
 
-The provider should be configurable using environment variables.
+Join the SAME workspace/room.
 
-Never hardcode API keys.
+---
 
-Future Proofing
+### Step 3
 
-The AI module must be completely independent of the editor logic so additional models or tools can be integrated later without modifying the rest of the application.
+Verify WebSocket connections.
 
-One more feature that would make this project exceptional
+Check browser DevTools → Network → WS.
 
-Ask the AI to implement "Review before Commit".
+Confirm both clients establish a WebSocket connection.
 
-Whenever the user clicks Commit or Create Pull Request, the AI automatically performs:
+Verify:
 
-✅ Code Review
-🐞 Bug Detection
-🔒 Security Scan
-⚡ Performance Analysis
-📊 Code Quality Score (0–100)
-💡 Improvement Suggestions
+```text
+Client A → connected
+Client B → connected
+```
 
-Only after the review does it allow the user to proceed. This mimics AI-assisted workflows in modern developer tools and makes the project significantly more impressive for recruiters and interviewers.
+Also inspect WebSocket messages.
+
+---
+
+### Step 4
+
+On port 3000:
+
+Open:
+
+```text
+Main.java
+```
+
+Change:
+
+```java
+System.out.println("Hello");
+```
+
+to:
+
+```java
+System.out.println("Hello World");
+```
+
+---
+
+### Step 5
+
+Verify port 3001.
+
+The change made by User A should appear in User B's editor without manually refreshing the page.
+
+Test:
+
+```text
+User A types
+      ↓
+WebSocket message
+      ↓
+Backend
+      ↓
+Broadcast to room
+      ↓
+User B editor updates
+```
+
+---
+
+# PART 9 — Test both directions
+
+Do NOT only test:
+
+```text
+User A → User B
+```
+
+Also test:
+
+```text
+User B → User A
+```
+
+User B changes:
+
+```java
+System.out.println("Changed by User B");
+```
+
+and verify User A receives the change.
+
+---
+
+# PART 10 — Test simultaneous editing
+
+Test:
+
+```text
+User A typing
++
+User B typing
+```
+
+at the same time.
+
+Check whether:
+
+* Changes are lost
+* Text gets overwritten
+* Duplicate content appears
+* Cursor jumps unexpectedly
+* Editor becomes inconsistent
+* WebSocket messages arrive out of order
+* One user's changes overwrite another user's changes
+
+If the current system does not implement a true conflict-resolution mechanism, document the limitation rather than pretending it is solved.
+
+---
+
+# PART 11 — WebSocket reconnection testing
+
+Test:
+
+```text
+User A connected
+User B connected
+```
+
+Then disconnect User B's network/WebSocket.
+
+While B is disconnected:
+
+```text
+User A edits file
+```
+
+Reconnect User B.
+
+Verify what happens.
+
+The system should synchronize B to the latest correct state rather than leaving B with stale content.
+
+If this is not currently supported, identify the missing mechanism and implement a clean resynchronization strategy where appropriate.
+
+---
+
+# PART 12 — Room isolation testing
+
+This is critical.
+
+Create:
+
+```text
+Room A
+Room B
+```
+
+Connect users to different rooms.
+
+Verify:
+
+```text
+User A in Room A
+      ↓
+Edit file
+      ↓
+Only Room A clients receive the update
+```
+
+A user connected to Room B must NOT receive Room A's WebSocket messages.
+
+---
+
+# PART 13 — Authentication and authorization
+
+Verify:
+
+### Normal user
+
+Can:
+
+```text
+Edit code
+Create pending revision
+View their changes
+View history
+```
+
+Cannot:
+
+```text
+Approve
+Reject
+Change review status directly
+```
+
+### Admin
+
+Can:
+
+```text
+View pending reviews
+View history
+View diff
+Approve
+Reject
+```
+
+The backend must enforce these permissions.
+
+Test by directly calling the APIs as a normal user, not just through the UI.
+
+---
+
+# PART 14 — Approval + WebSocket integration
+
+This is extremely important.
+
+There are two different concepts:
+
+### Collaborative editing
+
+```text
+User A changes code
+      ↓
+WebSocket
+      ↓
+Other collaborators see the working change
+```
+
+### Official approval
+
+```text
+User submits change
+      ↓
+PENDING revision
+      ↓
+Admin reviews
+      ↓
+APPROVED
+      ↓
+Official current version changes
+```
+
+Do not mix these two concepts.
+
+The WebSocket should synchronize the collaborative editing state according to the existing application's design, while the database must maintain the approved/pending revision state correctly.
+
+When Admin approves a revision, broadcast an appropriate event so connected clients know that the revision has become officially approved.
+
+---
+
+# PART 15 — Prevent duplicate / inconsistent versions
+
+Consider this situation:
+
+```text
+User edits
+   ↓
+Save request
+   ↓
+Network timeout
+   ↓
+Frontend retries
+```
+
+Make sure the same change is not accidentally stored multiple times.
+
+Inspect the current architecture and implement idempotency/unique revision handling if required.
+
+---
+
+# PART 16 — Database consistency
+
+Verify that:
+
+```text
+files.current_version_id
+```
+
+always points to the correct approved version.
+
+Example:
+
+```text
+Version 10 → APPROVED
+Version 11 → PENDING
+```
+
+Then:
+
+```text
+current_version_id = 10
+```
+
+After Admin approves Version 11:
+
+```text
+Version 10 → APPROVED
+Version 11 → APPROVED
+
+current_version_id = 11
+```
+
+If Version 11 is rejected:
+
+```text
+Version 10 → APPROVED
+Version 11 → REJECTED
+
+current_version_id = 10
+```
+
+Never point the current approved version to a rejected or pending revision.
+
+Use transactions where necessary.
+
+---
+
+# PART 17 — Test cases
+
+Perform and document at least these tests.
+
+### Approval
+
+```text
+1. User edits file
+2. Pending version created
+3. Admin sees pending review
+4. Admin opens history
+5. Admin sees correct diff
+6. Admin approves
+7. Current version changes
+8. Other clients receive approval update
+```
+
+### Rejection
+
+```text
+1. User edits file
+2. Pending version created
+3. Admin rejects
+4. Rejection reason saved
+5. Approved version remains unchanged
+6. User sees rejection status
+```
+
+### WebSocket
+
+```text
+1. User A → User B
+2. User B → User A
+3. Simultaneous edits
+4. Reconnect
+5. Room isolation
+6. Multiple users
+7. WebSocket disconnect
+8. WebSocket reconnect
+```
+
+### Authorization
+
+```text
+1. Normal user attempts approve API → 403
+2. Normal user attempts reject API → 403
+3. Admin approve → success
+4. Admin reject → success
+```
+
+### Database
+
+```text
+1. Pending revision does not replace approved version
+2. Approved revision becomes current
+3. Rejected revision never becomes current
+4. History remains immutable
+5. No duplicate revisions
+6. Correct reviewer is recorded
+```
+
+---
+
+# PART 18 — Performance / room entry
+
+Also investigate the issue where:
+
+```text
+Login
+  ↓
+Enter room
+  ↓
+UI takes time before becoming interactive
+```
+
+Do NOT assume the cause.
+
+Measure the room-entry flow.
+
+Check whether the frontend is downloading the contents of every file immediately.
+
+Prefer:
+
+```text
+Enter room
+   ↓
+Load room metadata
+   ↓
+Load file/folder tree
+   ↓
+Render UI immediately
+   ↓
+Load file content lazily when a file is opened
+```
+
+Do not load hundreds of file contents unnecessarily when the user only needs the file tree.
+
+Measure:
+
+* API response time
+* Number of API requests
+* Total response payload size
+* Database query time
+* Frontend processing time
+* React rendering time
+* WebSocket connection time
+
+Identify the actual bottleneck before changing the architecture.
+
+---
+
+# Final requirements
+
+Before making changes:
+
+1. Inspect the existing codebase.
+2. Understand the current file/version/history implementation.
+3. Understand the current WebSocket implementation.
+4. Understand the JWT/role implementation.
+5. Understand the current database schema.
+6. Understand how room joining works.
+7. Identify existing APIs before creating new ones.
+
+Then implement the feature incrementally.
+
+Do not break:
+
+* Existing authentication
+* Existing room functionality
+* Existing file/folder management
+* Existing WebSocket collaboration
+* Existing version history
+* Existing editor behavior
+
+At the end, provide:
+
+```text
+1. Files modified
+2. Database changes
+3. API changes
+4. WebSocket changes
+5. Frontend changes
+6. Approval workflow
+7. Rejection workflow
+8. WebSocket test results for ports 3000 and 3001
+9. Room isolation test results
+10. Reconnection test results
+11. Authorization test results
+12. Performance findings for room entry
+13. Remaining limitations
+```
+
+Do not claim a test passed unless you actually executed it and verified the result.

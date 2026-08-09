@@ -12,7 +12,9 @@ function TreeNode({
   onSelect, onAddFile, onAddFolder, onDelete, onRename,
   isRoot,
 }) {
-  const [open, setOpen] = useState(true);
+  // Start folders collapsed — prevents rendering hundreds of nodes at once
+  // in large projects, which was causing the initial lag/freeze.
+  const [open, setOpen] = useState(depth === 0); // only top-level starts open
   const [renaming, setRenaming] = useState(false);
   const [renamVal, setRenamVal] = useState(node.name);
   const renameInputRef = useRef(null);

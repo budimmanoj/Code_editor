@@ -37,6 +37,9 @@ public class CodeVersion {
     @Column(name = "reviewed_at")
     private LocalDateTime reviewedAt;
 
+    @Column(name = "review_comment", columnDefinition = "TEXT")
+    private String reviewComment; // Optional reason, especially for rejections
+
     public UUID getId() {
         return id;
     }
@@ -99,5 +102,13 @@ public class CodeVersion {
 
     public void setReviewedAt(LocalDateTime reviewedAt) {
         this.reviewedAt = reviewedAt;
+    }
+
+    public String getReviewComment() {
+        return reviewComment;
+    }
+
+    public void setReviewComment(String reviewComment) {
+        this.reviewComment = reviewComment;
     }
 }

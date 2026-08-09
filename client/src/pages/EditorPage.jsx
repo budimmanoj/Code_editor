@@ -84,8 +84,8 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   const [sideTab,      setSideTab]      = useState('files');
   const [error,        setError]        = useState('');
   const [inviteCode,   setInviteCode]   = useState('');
-  const [sidebarWidth, setSidebarWidth] = useState(240);
-  const [aiPanelWidth, setAiPanelWidth] = useState(300);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [aiPanelWidth, setAiPanelWidth] = useState(420);
   const [viewCodeVersion, setViewCodeVersion] = useState(null);
   const [downloadMsg,  setDownloadMsg]  = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -101,6 +101,10 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   const [reviewResult, setReviewResult] = useState('');
   const [reviewLoading,setReviewLoading]= useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+
+  // Upload drag-drop state
+  const [isDragOver,   setIsDragOver]   = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // { done, total, label }
 
   // Refs
   const socketRef        = useRef(null);
@@ -157,7 +161,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     const onMove = (ev) => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(() => {
-        setAiPanelWidth(Math.max(200, Math.min(800, window.innerWidth - ev.clientX)));
+        setAiPanelWidth(Math.max(300, Math.min(900, window.innerWidth - ev.clientX)));
       });
     };
     const onUp = () => {
@@ -174,11 +178,11 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   // ── Toast helper ───────────────────────────────────────────────────────────
 
-  function addToast(message, type = 'info') {
+  const addToast = useCallback((message, type = 'info') => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
-  }
+  }, []);
 
   // ── WebSocket setup ────────────────────────────────────────────────────────
 
@@ -305,9 +309,9 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   // ── Code editing & saving ──────────────────────────────────────────────────
 
-  function handleCodeChange(val) {
+  const handleCodeChange = useCallback((val) => {
     setCode(val);
-    if (!activeFile) return;
+    if (!activeFileRef.current) return;
     setSaveMsg('unsaved');
 
     // Don't echo remote updates back over WS
@@ -325,30 +329,41 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     typingTimer.current = setTimeout(() => {
       socketRef.current?.sendTyping(activeFileRef.current?.id, false);
     }, 2000);
-  }
+  }, []);
 
-  // Autosave: 1.5s after last keystroke
+  // saveCode — stable ref so autosave effect doesn't recreate on every keystroke
+  const saveCodeRef = useRef(null);
+  const saveCode = useCallback(async () => {
+    const file = activeFileRef.current;
+    if (!file) return;
+    setSaving(true);
+    setSaveMsg('saving');
+    // Read code from ref-stable closure via functional updater
+    setCode(currentCode => {
+      (async () => {
+        try {
+          await api.updateCode({ roomId, fileNodeId: file.id, content: currentCode });
+          setSavedCode(currentCode);
+          setSaveMsg('saved');
+          setTimeout(() => setSaveMsg(''), 2000);
+          loadVersions(file.id);
+        } catch (e) { setSaveMsg('error'); setError('Save failed: ' + e.message); }
+        finally { setSaving(false); }
+      })();
+      return currentCode; // no actual state change
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+  saveCodeRef.current = saveCode;
+
+  // Autosave: 3s after last keystroke — reduced from 1.5s to avoid hammering
+  // the DB while actively typing, especially in rooms with live collaboration.
   useEffect(() => {
     if (activeFile && code !== savedCode) {
-      const timer = setTimeout(saveCode, 1500);
+      const timer = setTimeout(() => saveCodeRef.current?.(), 3000);
       return () => clearTimeout(timer);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, activeFile, savedCode]);
-
-  async function saveCode() {
-    if (!activeFile) return;
-    setSaving(true);
-    setSaveMsg('saving'); // Optimistic visual feedback
-    try {
-      await api.updateCode({ roomId, fileNodeId: activeFile.id, content: code });
-      setSavedCode(code);
-      setSaveMsg('saved');
-      setTimeout(() => setSaveMsg(''), 2000);
-      loadVersions(activeFile.id);
-    } catch (e) { setSaveMsg('error'); setError('Save failed: ' + e.message); }
-    finally { setSaving(false); }
-  }
 
   // AI Review before saving — opens modal with review, then saves
   async function reviewAndSave() {
@@ -432,56 +447,217 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   async function handleFileUpload(e) {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
+    const textFiles = files.filter(f => !isBinaryFile(f.name));
+    const skipped   = files.filter(f =>  isBinaryFile(f.name)).map(f => f.name);
+    if (!textFiles.length) { setError(`Skipped binary files: ${skipped.join(', ')}`); return; }
+
     setSaving(true); setError('');
-    addToast('Uploading ' + files.length + ' file(s)...', 'info'); // Immediate feedback
-    const skipped = [];
+    setUploadProgress({ done: 0, total: textFiles.length, label: 'Reading files…' });
+
     try {
-      for (const file of files) {
-        if (isBinaryFile(file.name)) { skipped.push(file.name); continue; }
-        const content = sanitizeText(await file.text());
-        const language = langFromExt(file.name);
-        const created = await api.createFileNode({ roomId, parentId: null, name: file.name, type: 'FILE', language });
-        await api.updateCode({ roomId, fileNodeId: created.id, content });
+      // Read all files in parallel (reading is cheap — no server calls yet)
+      const prepared = await Promise.all(
+        textFiles.map(async (file) => ({
+          name:     file.name,
+          language: langFromExt(file.name),
+          content:  sanitizeText(await file.text()),
+        }))
+      );
+
+      setUploadProgress({ done: 0, total: prepared.length, label: 'Uploading…' });
+
+      // Upload in batches of 6 (same as folder upload — avoids overwhelming the server)
+      const CONCURRENCY = 6;
+      for (let i = 0; i < prepared.length; i += CONCURRENCY) {
+        const batch = prepared.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          batch.map(async ({ name, language, content }) => {
+            const created = await api.createFileNode({ roomId, parentId: null, name, type: 'FILE', language });
+            await api.updateCode({ roomId, fileNodeId: created.id, content });
+            setUploadProgress(p => ({ ...p, done: p.done + 1 }));
+          })
+        );
       }
+
       if (skipped.length) setError(`Skipped binary files: ${skipped.join(', ')}`);
+      addToast(`Uploaded ${prepared.length} file(s)`, 'info');
       await loadTree();
     } catch (err) { setError('Upload failed: ' + err.message); }
-    finally { setSaving(false); e.target.value = ''; }
+    finally { setSaving(false); setUploadProgress(null); e.target.value = ''; }
   }
 
   async function handleFolderUpload(e) {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
+    const textFiles = files.filter(f => !isBinaryFile(f.name));
+    const skipped   = files.filter(f =>  isBinaryFile(f.name)).map(f => f.webkitRelativePath);
+
     setSaving(true); setError('');
-    addToast('Uploading folder...', 'info'); // Immediate feedback
-    const skipped = [];
+    setUploadProgress({ done: 0, total: textFiles.length, label: 'Building folder structure…' });
+
     try {
+      // ── Step 1: Create all unique FOLDER nodes (must be sequential for parent refs) ──
       const dirMap = { '': null };
-      for (const file of files) {
-        if (isBinaryFile(file.name)) { skipped.push(file.webkitRelativePath); continue; }
+      const allDirPaths = new Set();
+      for (const file of textFiles) {
         const parts = file.webkitRelativePath.split('/');
-        let currentPath = '', currentParentId = null;
+        let path = '';
         for (let i = 0; i < parts.length - 1; i++) {
-          const dirName = parts[i];
-          const newPath = currentPath ? `${currentPath}/${dirName}` : dirName;
-          if (!(newPath in dirMap)) {
-            const created = await api.createFileNode({ roomId, parentId: currentParentId, name: dirName, type: 'FOLDER' });
-            dirMap[newPath] = created.id;
-          }
-          currentParentId = dirMap[newPath];
-          currentPath = newPath;
+          path = path ? `${path}/${parts[i]}` : parts[i];
+          allDirPaths.add(path);
         }
-        const fileName = parts[parts.length - 1];
-        if (!fileName) continue;
-        const content = sanitizeText(await file.text());
-        const language = langFromExt(fileName);
-        const created = await api.createFileNode({ roomId, parentId: currentParentId, name: fileName, type: 'FILE', language });
-        await api.updateCode({ roomId, fileNodeId: created.id, content });
       }
+      // Sort so parents come before children
+      const sortedDirs = [...allDirPaths].sort((a, b) => a.split('/').length - b.split('/').length);
+      for (const dirPath of sortedDirs) {
+        if (dirPath in dirMap) continue;
+        const parts     = dirPath.split('/');
+        const dirName   = parts[parts.length - 1];
+        const parentKey = parts.slice(0, -1).join('/');
+        const created   = await api.createFileNode({ roomId, parentId: dirMap[parentKey] ?? null, name: dirName, type: 'FOLDER' });
+        dirMap[dirPath] = created.id;
+      }
+
+      setUploadProgress({ done: 0, total: textFiles.length, label: 'Reading & uploading files…' });
+
+      // ── Step 2: Read all file contents in parallel ──
+      const prepared = await Promise.all(
+        textFiles.map(async (file) => {
+          const parts     = file.webkitRelativePath.split('/');
+          const fileName  = parts[parts.length - 1];
+          const parentKey = parts.slice(0, -1).join('/');
+          return {
+            name:     fileName,
+            language: langFromExt(fileName),
+            parentId: dirMap[parentKey] ?? null,
+            content:  sanitizeText(await file.text()),
+          };
+        })
+      );
+
+      // ── Step 3: Upload files in parallel (up to 6 at a time) ──
+      const CONCURRENCY = 6;
+      for (let i = 0; i < prepared.length; i += CONCURRENCY) {
+        const batch = prepared.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          batch.map(async ({ name, language, parentId, content }) => {
+            const created = await api.createFileNode({ roomId, parentId, name, type: 'FILE', language });
+            await api.updateCode({ roomId, fileNodeId: created.id, content });
+            setUploadProgress(p => ({ ...p, done: p.done + 1 }));
+          })
+        );
+      }
+
       if (skipped.length) setError(`Skipped binary files: ${skipped.join(', ')}`);
+      addToast(`Uploaded folder — ${prepared.length} files`, 'info');
       await loadTree();
     } catch (err) { setError('Folder upload failed: ' + err.message); }
-    finally { setSaving(false); e.target.value = ''; }
+    finally { setSaving(false); setUploadProgress(null); e.target.value = ''; }
+  }
+
+  // ── Drag-and-Drop on empty editor ─────────────────────────────────────────
+
+  function handleDropzoneDragOver(e) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+  function handleDropzoneDragLeave(e) {
+    if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
+  }
+  async function handleDropzoneDrop(e) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const items = [...(e.dataTransfer.items || [])];
+    const files = [...(e.dataTransfer.files || [])];
+
+    // Detect folder drop via DataTransferItem.webkitGetAsEntry
+    const hasFolder = items.some(item => {
+      try { return item.webkitGetAsEntry?.()?.isDirectory; } catch { return false; }
+    });
+
+    if (hasFolder) {
+      // Collect all file entries recursively
+      const allFileEntries = [];
+      async function readEntry(entry, path = '') {
+        if (entry.isFile) {
+          allFileEntries.push({ entry, path });
+        } else if (entry.isDirectory) {
+          const reader = entry.createReader();
+          const entries = await new Promise(res => reader.readEntries(res));
+          for (const e2 of entries) await readEntry(e2, path ? `${path}/${entry.name}` : entry.name);
+        }
+      }
+      for (const item of items) {
+        const entry = item.webkitGetAsEntry?.();
+        if (entry) await readEntry(entry, '');
+      }
+
+      if (!allFileEntries.length) return;
+      // Read all as File objects
+      const fileObjs = await Promise.all(
+        allFileEntries.map(({ entry, path }) =>
+          new Promise(res => entry.file(f => res({ file: f, relativePath: `${path ? path + '/' : ''}${f.name}` })))
+        )
+      );
+      // Reuse folder upload logic inline
+      await uploadFromFileList(fileObjs.map(({ file, relativePath }) => ({ file, relativePath })));
+    } else {
+      // Plain files drop
+      const fakeEvt = { target: { files, value: '' } };
+      await handleFileUpload(fakeEvt);
+    }
+  }
+
+  async function uploadFromFileList(fileList) {
+    const textFiles = fileList.filter(({ file }) => !isBinaryFile(file.name));
+    const skipped   = fileList.filter(({ file }) =>  isBinaryFile(file.name)).map(({ relativePath }) => relativePath);
+    if (!textFiles.length) { setError(`Skipped binary files: ${skipped.join(', ')}`); return; }
+
+    setSaving(true); setError('');
+    setUploadProgress({ done: 0, total: textFiles.length, label: 'Building folder structure…' });
+
+    try {
+      const dirMap = { '': null };
+      const allDirPaths = new Set();
+      for (const { relativePath } of textFiles) {
+        const parts = relativePath.split('/');
+        let path = '';
+        for (let i = 0; i < parts.length - 1; i++) {
+          path = path ? `${path}/${parts[i]}` : parts[i];
+          allDirPaths.add(path);
+        }
+      }
+      const sortedDirs = [...allDirPaths].sort((a, b) => a.split('/').length - b.split('/').length);
+      for (const dirPath of sortedDirs) {
+        if (dirPath in dirMap) continue;
+        const parts     = dirPath.split('/');
+        const dirName   = parts[parts.length - 1];
+        const parentKey = parts.slice(0, -1).join('/');
+        const created   = await api.createFileNode({ roomId, parentId: dirMap[parentKey] ?? null, name: dirName, type: 'FOLDER' });
+        dirMap[dirPath] = created.id;
+      }
+      setUploadProgress({ done: 0, total: textFiles.length, label: 'Uploading files…' });
+      const prepared = await Promise.all(
+        textFiles.map(async ({ file, relativePath }) => {
+          const parts     = relativePath.split('/');
+          const fileName  = parts[parts.length - 1];
+          const parentKey = parts.slice(0, -1).join('/');
+          return { name: fileName, language: langFromExt(fileName), parentId: dirMap[parentKey] ?? null, content: sanitizeText(await file.text()) };
+        })
+      );
+      const CONCURRENCY = 6;
+      for (let i = 0; i < prepared.length; i += CONCURRENCY) {
+        await Promise.all(prepared.slice(i, i + CONCURRENCY).map(async ({ name, language, parentId, content }) => {
+          const created = await api.createFileNode({ roomId, parentId, name, type: 'FILE', language });
+          await api.updateCode({ roomId, fileNodeId: created.id, content });
+          setUploadProgress(p => ({ ...p, done: p.done + 1 }));
+        }));
+      }
+      if (skipped.length) setError(`Skipped binary files: ${skipped.join(', ')}`);
+      addToast(`Uploaded ${prepared.length} files`, 'info');
+      await loadTree();
+    } catch (err) { setError('Upload failed: ' + err.message); }
+    finally { setSaving(false); setUploadProgress(null); }
   }
 
   // ── Download ───────────────────────────────────────────────────────────────
@@ -542,13 +718,13 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   useEffect(() => {
     function onKey(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCode(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCodeRef.current?.(); }
       if ((e.ctrlKey || e.metaKey) && e.key === '`') { e.preventDefault(); setShowAiPanel(p => !p); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFile, code]);
+    // saveCodeRef is a stable ref — no deps needed, avoids re-registering on every keystroke
+  }, []);
 
   // ── Typing indicator text ──────────────────────────────────────────────────
 
@@ -829,14 +1005,58 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
               </div>
             </>
           ) : (
-            <div className="empty-editor">
-              <FileCode size={48} className="empty-icon" />
-              <p className="empty-title">No file open</p>
-              <p className="empty-sub">Select a file from the explorer or create a new one.</p>
-              <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                <button className="btn-primary" onClick={() => setModal({ type: 'FILE', parentId: null })}>New File</button>
-                <button className="btn-ghost" onClick={() => fileInputRef.current.click()}>Upload File</button>
-              </div>
+            <div
+              className={`empty-editor dropzone ${isDragOver ? 'drag-active' : ''}`}
+              onDragOver={handleDropzoneDragOver}
+              onDragLeave={handleDropzoneDragLeave}
+              onDrop={handleDropzoneDrop}
+            >
+              {uploadProgress ? (
+                /* ── Upload progress view ── */
+                <div className="upload-progress-wrap">
+                  <div className="upload-progress-icon">
+                    <Upload size={32} className="upload-spin-icon" />
+                  </div>
+                  <p className="upload-progress-label">{uploadProgress.label}</p>
+                  <div className="upload-progress-bar-track">
+                    <div
+                      className="upload-progress-bar-fill"
+                      style={{ width: uploadProgress.total ? `${(uploadProgress.done / uploadProgress.total) * 100}%` : '5%' }}
+                    />
+                  </div>
+                  <p className="upload-progress-count">
+                    {uploadProgress.done} / {uploadProgress.total} files
+                  </p>
+                </div>
+              ) : isDragOver ? (
+                /* ── Drag over view ── */
+                <div className="dropzone-drag-hint">
+                  <FolderUp size={48} className="empty-icon" style={{ color: 'var(--accent)' }} />
+                  <p className="empty-title" style={{ color: 'var(--accent)' }}>Drop to upload</p>
+                  <p className="empty-sub">Files or entire folders</p>
+                </div>
+              ) : (
+                /* ── Default empty state ── */
+                <>
+                  <FileCode size={48} className="empty-icon" />
+                  <p className="empty-title">No file open</p>
+                  <p className="empty-sub">Select a file from the explorer, or drop files &amp; folders here</p>
+                  <div className="empty-actions">
+                    <button className="btn-primary" onClick={() => setModal({ type: 'FILE', parentId: null })}>
+                      <FileCode size={14} /> New File
+                    </button>
+                    <button className="btn-ghost" onClick={() => fileInputRef.current.click()}>
+                      <Upload size={14} /> Upload Files
+                    </button>
+                    <button className="btn-ghost" onClick={() => folderInputRef.current.click()}>
+                      <FolderUp size={14} /> Upload Folder
+                    </button>
+                  </div>
+                  <div className="dropzone-hint">
+                    <span>or drag &amp; drop anywhere in this area</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </main>

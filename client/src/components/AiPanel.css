@@ -1,8 +1,8 @@
 /* ── AI Panel ──────────────────────────────────────────────────────────────── */
 
 .ai-panel {
-  width: 300px;
-  flex: 0 0 300px;
+  width: 100%;
+  min-width: 300px;
   display: flex;
   flex-direction: column;
   background: var(--bg0);
@@ -238,7 +238,7 @@
   font-family: var(--font-ui);
   padding: 10px 40px 10px 12px;
   resize: none;
-  height: 80px;
+  height: 96px;
   line-height: 1.5;
   transition: border-color 0.2s;
   outline: none;

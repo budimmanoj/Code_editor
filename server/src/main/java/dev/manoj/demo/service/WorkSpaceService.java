@@ -3,11 +3,14 @@ import java.time.LocalDateTime;
 import dev.manoj.demo.dto.*;
 import dev.manoj.demo.enums.RoomRole;
 import dev.manoj.demo.model.FileNode;
+import dev.manoj.demo.dto.FileNodeInfo;
 import dev.manoj.demo.model.Room;
 import dev.manoj.demo.model.RoomParticipant;
 import dev.manoj.demo.repository.FileNodeRepository;
 import dev.manoj.demo.repository.RoomParticipantRepository;
 import dev.manoj.demo.repository.RoomRepository;
+import dev.manoj.demo.websocket.RoomWebSocketHandler;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,17 +31,20 @@ public class WorkSpaceService {
     private final RoomRepository roomRepository;
     private final CodeVersionRepository codeVersionRepository;
     private final UserRepository userRepository;
+    private final RoomWebSocketHandler wsHandler;
 
     public WorkSpaceService(FileNodeRepository fileNodeRepository,
                             RoomParticipantRepository roomParticipantRepository,
                             RoomRepository roomRepository,
                             CodeVersionRepository codeVersionRepository,
-                            UserRepository userRepository) {
+                            UserRepository userRepository,
+                            @Lazy RoomWebSocketHandler wsHandler) {
         this.fileNodeRepository = fileNodeRepository;
         this.roomParticipantRepository = roomParticipantRepository;
         this.roomRepository = roomRepository;
         this.codeVersionRepository = codeVersionRepository;
         this.userRepository = userRepository;
+        this.wsHandler = wsHandler;
     }
 
     // ── Sanitize content: strip null bytes that PostgreSQL rejects in UTF-8 columns ──
@@ -72,64 +78,115 @@ public class WorkSpaceService {
         return fileNode.getContent();
     }
 
+    /**
+     * Save code edit from a participant.
+     *
+     * ADMIN → updates fileNode.content directly (canonical) + creates REVIEWED version.
+     * USER  → creates PENDING version only. Does NOT overwrite fileNode.content so the
+     *          admin-approved version stays intact until an admin reviews it.
+     */
     public String updateCode(UpdateCodeDto dto) {
-        // Both ADMINs and USERs can edit code
         requireParticipant(dto.getRoomId(), dto.getUserId());
         FileNode fileNode = fileNodeRepository
                 .findByIdAndRoom_Id(dto.getFileNodeId(), dto.getRoomId())
                 .orElseThrow(() -> new RuntimeException("File not found in this room"));
 
-        // Sanitize: remove null bytes to prevent PostgreSQL UTF-8 encoding errors
         String safeContent = sanitizeContent(dto.getContent());
-
-        fileNode.setContent(safeContent);
-        fileNodeRepository.save(fileNode);
 
         User user = userRepository.findById(dto.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        CodeReviewStatus status = CodeReviewStatus.PENDING;
-        RoomParticipant p = roomParticipantRepository.findByRoom_IdAndUser_Id(dto.getRoomId(), dto.getUserId()).orElse(null);
-        if (p != null && p.getRole() == RoomRole.ADMIN) {
-            status = CodeReviewStatus.REVIEWED;
-        }
+        RoomParticipant p = roomParticipantRepository
+                .findByRoom_IdAndUser_Id(dto.getRoomId(), dto.getUserId()).orElse(null);
+        boolean isAdmin = p != null && p.getRole() == RoomRole.ADMIN;
 
+        if (isAdmin) {
+            // Admin edits are immediately canonical
+            fileNode.setContent(safeContent);
+            fileNodeRepository.save(fileNode);
+        }
+        // For normal users we deliberately do NOT update fileNode.content here —
+        // the WS auto-save in RoomWebSocketHandler still writes the live content
+        // for collaboration purposes, but the official reviewed content remains
+        // the last admin-approved value until an admin approves this version.
+
+        CodeReviewStatus status = isAdmin ? CodeReviewStatus.REVIEWED : CodeReviewStatus.PENDING;
         CodeVersion version = new CodeVersion();
         version.setFileNode(fileNode);
         version.setUser(user);
         version.setContent(safeContent);
         version.setStatus(status);
-        if (status == CodeReviewStatus.REVIEWED) {
-            version.setReviewedBy(user.getUsername() != null ? user.getUsername() : user.getEmail());
+        if (isAdmin) {
+            String reviewer = user.getUsername() != null ? user.getUsername() : user.getEmail();
+            version.setReviewedBy(reviewer);
             version.setReviewedAt(LocalDateTime.now());
         }
         codeVersionRepository.save(version);
 
-        return "Code saved";
+        return isAdmin ? "Code saved (admin — approved immediately)" : "Code submitted for review";
     }
 
     public List<CodeVersionDto> getFileVersions(UUID roomId, UUID fileNodeId, UUID userId) {
         requireParticipant(roomId, userId);
-        fileNodeRepository.findByIdAndRoom_Id(fileNodeId, roomId)
+        FileNode file = fileNodeRepository.findByIdAndRoom_Id(fileNodeId, roomId)
                 .orElseThrow(() -> new RuntimeException("File not found in this room"));
 
         List<CodeVersion> versions = codeVersionRepository.findByFileNode_IdOrderByCreatedAtDesc(fileNodeId);
-        return versions.stream().map(v -> {
-            CodeVersionDto dto = new CodeVersionDto();
-            dto.setId(v.getId());
-            dto.setFileNodeId(v.getFileNode().getId());
-            dto.setUserId(v.getUser().getId());
-            dto.setUsername(v.getUser().getUsername() != null ? v.getUser().getUsername() : v.getUser().getEmail());
-            dto.setContent(v.getContent());
-            dto.setStatus(v.getStatus());
-            dto.setCreatedAt(v.getCreatedAt() != null ? v.getCreatedAt().toString() : null);
-            dto.setReviewedBy(v.getReviewedBy());
-            dto.setReviewedAt(v.getReviewedAt() != null ? v.getReviewedAt().toString() : null);
-            return dto;
-        }).toList();
+        return versions.stream().map(v -> toDto(v, file.getName())).toList();
     }
 
-    public String updateVersionStatus(UUID roomId, UUID versionId, CodeReviewStatus status, UUID adminId) {
+    private CodeVersionDto toDto(CodeVersion v, String fileName) {
+        CodeVersionDto dto = new CodeVersionDto();
+        dto.setId(v.getId());
+        dto.setFileNodeId(v.getFileNode().getId());
+        dto.setFileName(fileName);
+        dto.setUserId(v.getUser().getId());
+        dto.setUsername(v.getUser().getUsername() != null ? v.getUser().getUsername() : v.getUser().getEmail());
+        dto.setContent(v.getContent());
+        dto.setStatus(v.getStatus());
+        dto.setCreatedAt(v.getCreatedAt() != null ? v.getCreatedAt().toString() : null);
+        dto.setReviewedBy(v.getReviewedBy());
+        dto.setReviewedAt(v.getReviewedAt() != null ? v.getReviewedAt().toString() : null);
+        dto.setReviewComment(v.getReviewComment());
+        return dto;
+    }
+
+    /**
+     * Returns all PENDING versions in a room — for the admin review dashboard.
+     * Only admins of the room may call this.
+     */
+    public List<CodeVersionDto> getPendingVersions(UUID roomId, UUID adminId) {
+        requireAdmin(roomId, adminId);
+        List<FileNode> roomFiles = fileNodeRepository.findAllByRoom_Id(roomId);
+        List<CodeVersionDto> result = new ArrayList<>();
+        for (FileNode file : roomFiles) {
+            List<CodeVersion> pending = codeVersionRepository
+                    .findByFileNode_IdOrderByCreatedAtDesc(file.getId())
+                    .stream()
+                    .filter(v -> v.getStatus() == CodeReviewStatus.PENDING)
+                    .toList();
+            for (CodeVersion v : pending) {
+                result.add(toDto(v, file.getName()));
+            }
+        }
+        result.sort(Comparator.comparing(CodeVersionDto::getCreatedAt,
+                Comparator.nullsLast(Comparator.naturalOrder())).reversed());
+        return result;
+    }
+
+    /**
+     * Admin approves or rejects a pending version.
+     *
+     * REVIEWED (approve) → updates fileNode.content to the approved version content.
+     *                       Broadcasts REVISION_APPROVED over WebSocket so live collaborators
+     *                       can refresh their editor to the now-official content.
+     * REJECTED            → marks the version rejected, stores optional comment.
+     *                       fileNode.content remains unchanged.
+     * NO_CHANGE           → legacy revert-to-previous behaviour.
+     */
+    public String updateVersionStatus(UUID roomId, UUID versionId,
+                                      CodeReviewStatus status, UUID adminId,
+                                      String reviewComment) {
         requireAdmin(roomId, adminId);
         CodeVersion version = codeVersionRepository.findById(versionId)
                 .orElseThrow(() -> new RuntimeException("Version not found"));
@@ -138,40 +195,73 @@ public class WorkSpaceService {
             throw new RuntimeException("Version does not belong to this room");
         }
 
-        version.setStatus(status);
-
         User admin = userRepository.findById(adminId).orElseThrow();
-        version.setReviewedBy(admin.getUsername() != null ? admin.getUsername() : admin.getEmail());
-        version.setReviewedAt(LocalDateTime.now());
+        String reviewerName = admin.getUsername() != null ? admin.getUsername() : admin.getEmail();
 
+        version.setStatus(status);
+        version.setReviewedBy(reviewerName);
+        version.setReviewedAt(LocalDateTime.now());
+        if (reviewComment != null && !reviewComment.isBlank()) {
+            version.setReviewComment(reviewComment.trim());
+        }
         codeVersionRepository.save(version);
 
-        if (status == CodeReviewStatus.NO_CHANGE) {
-            List<CodeVersion> allVersions = codeVersionRepository.findByFileNode_IdOrderByCreatedAtDesc(version.getFileNode().getId());
-            CodeVersion previousVersion = null;
-            for (CodeVersion v : allVersions) {
-                if (v.getCreatedAt().isBefore(version.getCreatedAt())) {
-                    previousVersion = v;
-                    break;
-                }
-            }
+        FileNode fileNode = version.getFileNode();
+
+        if (status == CodeReviewStatus.REVIEWED) {
+            // Approval: the pending content becomes the canonical version
+            String approvedContent = sanitizeContent(version.getContent());
+            fileNode.setContent(approvedContent);
+            fileNodeRepository.save(fileNode);
+
+            // Notify all connected clients in this room that the official
+            // file content has changed so they can refresh their editors
+            wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
+                "type",       "REVISION_APPROVED",
+                "fileId",     fileNode.getId().toString(),
+                "content",    approvedContent != null ? approvedContent : "",
+                "approvedBy", reviewerName,
+                "versionId",  versionId.toString()
+            ));
+
+        } else if (status == CodeReviewStatus.REJECTED) {
+            // Rejection: fileNode.content stays as-is (the last approved version)
+            wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
+                "type",      "REVISION_REJECTED",
+                "fileId",    fileNode.getId().toString(),
+                "versionId", versionId.toString(),
+                "reason",    reviewComment != null ? reviewComment : ""
+            ));
+
+        } else if (status == CodeReviewStatus.NO_CHANGE) {
+            // Legacy: revert to previous approved version
+            List<CodeVersion> allVersions = codeVersionRepository
+                    .findByFileNode_IdOrderByCreatedAtDesc(fileNode.getId());
+            CodeVersion previousVersion = allVersions.stream()
+                    .filter(v -> v.getCreatedAt().isBefore(version.getCreatedAt()))
+                    .findFirst().orElse(null);
             if (previousVersion != null) {
-                FileNode fileNode = version.getFileNode();
-                fileNode.setContent(sanitizeContent(previousVersion.getContent()));
+                String revertContent = sanitizeContent(previousVersion.getContent());
+                fileNode.setContent(revertContent);
                 fileNodeRepository.save(fileNode);
 
                 CodeVersion revertVersion = new CodeVersion();
                 revertVersion.setFileNode(fileNode);
                 revertVersion.setUser(admin);
-                revertVersion.setContent(sanitizeContent(previousVersion.getContent()));
+                revertVersion.setContent(revertContent);
                 revertVersion.setStatus(CodeReviewStatus.REVIEWED);
-                revertVersion.setReviewedBy(admin.getUsername() != null ? admin.getUsername() : admin.getEmail());
+                revertVersion.setReviewedBy(reviewerName);
                 revertVersion.setReviewedAt(LocalDateTime.now());
                 codeVersionRepository.save(revertVersion);
             }
         }
 
         return "Status updated to " + status.name();
+    }
+
+    /** Backward-compat overload without comment */
+    public String updateVersionStatus(UUID roomId, UUID versionId, CodeReviewStatus status, UUID adminId) {
+        return updateVersionStatus(roomId, versionId, status, adminId, null);
     }
 
     public String revertToVersion(UUID roomId, UUID fileNodeId, UUID versionId, UUID userId) {
@@ -228,9 +318,19 @@ public class WorkSpaceService {
      * Returns a virtual root wrapping all top-level nodes.
      * Fixes the case where there is no single root node, multiple roots, or empty room.
      */
+    /**
+     * Returns the file/folder tree for a room.
+     *
+     * Uses a lightweight projection query (findMetadataByRoom_Id) that fetches
+     * ONLY id, name, type, language, and parentId — it intentionally skips the
+     * "content" TEXT column. Loading the full content for every file just to
+     * render a file tree was the primary cause of lag in rooms with many files.
+     */
     public FileTreeDto getFileTree(UUID roomId, UUID userId) {
         requireParticipant(roomId, userId);
-        List<FileNode> fileNodes = fileNodeRepository.findAllByRoom_Id(roomId);
+
+        // Lightweight query — does NOT load file content
+        List<FileNodeInfo> fileNodes = fileNodeRepository.findMetadataByRoom_Id(roomId);
 
         if (fileNodes.isEmpty()) {
             return null;
@@ -238,7 +338,7 @@ public class WorkSpaceService {
 
         Map<UUID, FileTreeDto> dtoMap = new LinkedHashMap<>();
 
-        for (FileNode node : fileNodes) {
+        for (FileNodeInfo node : fileNodes) {
             FileTreeDto dto = new FileTreeDto();
             dto.setId(node.getId());
             dto.setName(node.getName());
@@ -247,14 +347,14 @@ public class WorkSpaceService {
             dtoMap.put(node.getId(), dto);
         }
 
-        // Wire up parent → children
+        // Wire up parent → children using the projected parentId
         List<FileTreeDto> roots = new ArrayList<>();
-        for (FileNode node : fileNodes) {
+        for (FileNodeInfo node : fileNodes) {
             FileTreeDto dto = dtoMap.get(node.getId());
-            if (node.getParent() == null) {
+            if (node.getParentId() == null) {
                 roots.add(dto);
             } else {
-                FileTreeDto parentDto = dtoMap.get(node.getParent().getId());
+                FileTreeDto parentDto = dtoMap.get(node.getParentId());
                 if (parentDto != null) {
                     parentDto.addChild(dto);
                 } else {

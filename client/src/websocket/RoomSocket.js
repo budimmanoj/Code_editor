@@ -29,6 +29,12 @@ export class RoomSocket {
   }
 
   connect() {
+    // Guard: don't open a second connection if one is already active
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN ||
+                    this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     const url = `${WS_BASE}/ws/room/${this.roomId}?token=${this.token}`;
     try {
       this.ws = new WebSocket(url);
