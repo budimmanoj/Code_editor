@@ -9,6 +9,7 @@ import dev.manoj.demo.repository.FileNodeRepository;
 import dev.manoj.demo.repository.RoomParticipantRepository;
 import dev.manoj.demo.repository.RoomRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -19,6 +20,7 @@ import dev.manoj.demo.model.User;
 import dev.manoj.demo.enums.CodeReviewStatus;
 
 @Service
+@Transactional
 public class WorkSpaceService {
 
     private final FileNodeRepository fileNodeRepository;

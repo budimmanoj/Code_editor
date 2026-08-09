@@ -1,4 +1,5 @@
 import React from 'react';
+import { Users, ShieldCheck, User } from 'lucide-react';
 import './Participants.css';
 
 const ROLE_COLORS = {
@@ -18,7 +19,7 @@ export default function Participants({ participants, currentUserId, onlineUsers 
   if (!participants || participants.length === 0) {
     return (
       <div className="participants-empty">
-        <div style={{ fontSize: 28, marginBottom: 8 }}>👥</div>
+        <Users size={28} style={{ marginBottom: 12, opacity: 0.5 }} />
         No participants yet
       </div>
     );
@@ -47,7 +48,7 @@ export default function Participants({ participants, currentUserId, onlineUsers 
 
       {admins.length > 0 && (
         <>
-          <div className="participants-group-label">🛡 Admin</div>
+          <div className="participants-group-label"><ShieldCheck size={12} style={{ marginRight: 4 }} /> Admin</div>
           {admins.map(p => (
             <ParticipantRow
               key={p.userId}
@@ -61,7 +62,7 @@ export default function Participants({ participants, currentUserId, onlineUsers 
 
       {members.length > 0 && (
         <>
-          <div className="participants-group-label">👥 Members</div>
+          <div className="participants-group-label"><User size={12} style={{ marginRight: 4 }} /> Members</div>
           {members.map(p => (
             <ParticipantRow
               key={p.userId}

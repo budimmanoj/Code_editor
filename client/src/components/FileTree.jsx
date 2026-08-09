@@ -1,18 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { ChevronRight, File, Folder, Plus, Edit2, Trash2 } from 'lucide-react';
 import './FileTree.css';
 
-const LANG_COLORS = {
-  java: '#f89820', javascript: '#f7df1e', python: '#3572A5',
-  css: '#563d7c', html: '#e34c26', default: '#8c93aa',
-  typescript: '#3178c6', go: '#00add8', rust: '#ce422b',
-  c: '#555555', cpp: '#00599c', ruby: '#cc342d', php: '#777bb4',
-};
-
 function FileIcon({ node }) {
-  if (node.fileType === 'FOLDER') return <span className="ft-icon ft-folder">📁</span>;
-  const lang = (node.language || '').toLowerCase();
-  const color = LANG_COLORS[lang] || LANG_COLORS.default;
-  return <span className="ft-icon" style={{ color }}>◆</span>;
+  if (node.fileType === 'FOLDER') return <Folder size={14} className="ft-icon" />;
+  return <File size={14} className="ft-icon" />;
 }
 
 function TreeNode({
@@ -65,11 +57,13 @@ function TreeNode({
         <div className="ft-root-actions">
           <button className="ft-root-btn" title="New root file"
             onClick={() => onAddFile && onAddFile(null)}>
-            <span>📄</span><span>+</span>
+            <File size={14} />
+            New File
           </button>
           <button className="ft-root-btn" title="New root folder"
             onClick={() => onAddFolder && onAddFolder(null)}>
-            <span>📁</span><span>+</span>
+            <Folder size={14} />
+            New Folder
           </button>
         </div>
       </div>
@@ -88,7 +82,7 @@ function TreeNode({
         }}
       >
         {isFolder && (
-          <span className={`ft-arrow ${open ? 'open' : ''}`}>›</span>
+          <div className={`ft-arrow ${open ? 'open' : ''}`}><ChevronRight size={14} /></div>
         )}
         <FileIcon node={node} />
 
@@ -114,36 +108,32 @@ function TreeNode({
           }}>{node.name}</span>
         )}
 
-        {node.language && !renaming && (
-          <span className="ft-lang">{node.language}</span>
-        )}
-
         {!renaming && (
           <div className="ft-actions" onClick={e => e.stopPropagation()}>
             {isFolder && (
               <>
                 {typeof onAddFile === 'function' && (
-                  <button className="ft-action-btn add-file" title="New file in folder"
+                  <button className="ft-action-btn" title="New file in folder"
                     onClick={e => { e.stopPropagation(); onAddFile(node.id); }}>
-                    <span className="icon">📄</span><span className="plus">+</span>
+                    <Plus size={12} />
                   </button>
                 )}
                 {typeof onAddFolder === 'function' && (
-                  <button className="ft-action-btn add-folder" title="New folder"
+                  <button className="ft-action-btn" title="New folder"
                     onClick={e => { e.stopPropagation(); onAddFolder(node.id); }}>
-                    <span className="icon">📁</span><span className="plus">+</span>
+                    <Folder size={12} />
                   </button>
                 )}
               </>
             )}
-            <button className="ft-action-btn rename-btn" title="Rename (or double-click)"
+            <button className="ft-action-btn" title="Rename (or double-click)"
               onClick={e => { e.stopPropagation(); setRenamVal(node.name); setRenaming(true); }}>
-              ✎
+              <Edit2 size={12} />
             </button>
             {typeof onDelete === 'function' && (
               <button className="ft-action-btn delete-btn" title="Delete"
                 onClick={e => { e.stopPropagation(); onDelete(node.id, node.name, isFolder); }}>
-                ✕
+                <Trash2 size={12} />
               </button>
             )}
           </div>
@@ -176,10 +166,10 @@ export default function FileTree({
       <span>No files yet</span>
       <div style={{ display: 'flex', gap: 8 }}>
         {typeof onAddFile === 'function' && (
-          <button className="ft-create-btn" onClick={() => onAddFile(null)}>+ New File</button>
+          <button className="btn-primary" onClick={() => onAddFile(null)}>New File</button>
         )}
         {typeof onAddFolder === 'function' && (
-          <button className="ft-create-btn" onClick={() => onAddFolder(null)}>+ New Folder</button>
+          <button className="btn-ghost" onClick={() => onAddFolder(null)}>New Folder</button>
         )}
       </div>
     </div>
@@ -204,13 +194,13 @@ export default function FileTree({
           {typeof onAddFile === 'function' && (
             <button className="ft-root-btn" title="New root file"
               onClick={() => onAddFile(null)}>
-              <span>📄</span><span>+</span>
+              <File size={14} /> New File
             </button>
           )}
           {typeof onAddFolder === 'function' && (
             <button className="ft-root-btn" title="New root folder"
               onClick={() => onAddFolder(null)}>
-              <span>📁</span><span>+</span>
+              <Folder size={14} /> New Folder
             </button>
           )}
         </div>

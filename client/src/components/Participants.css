@@ -8,50 +8,49 @@
   justify-content: space-between;
   padding: 8px 12px 6px;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .participants-title {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text2);
-  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+  color: var(--text1);
 }
 
 .participants-count {
   font-size: 11px;
   background: var(--bg4);
-  color: var(--text2);
-  padding: 1px 6px;
+  color: var(--text0);
+  padding: 2px 6px;
   border-radius: 10px;
   font-weight: 600;
-  font-family: var(--font-mono);
 }
 
 .participants-group-label {
+  display: flex;
+  align-items: center;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text2);
-  padding: 6px 12px 4px;
-  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+  color: var(--text1);
+  padding: 8px 12px 4px;
 }
 
 .participant-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 12px;
-  border-radius: 6px;
-  margin: 1px 6px;
+  padding: 8px 12px;
+  border-radius: var(--r);
+  margin: 2px 8px;
   transition: background 0.15s;
 }
 
 .participant-item:hover { background: var(--bg4); }
-.participant-item.me    { background: rgba(124, 58, 237, 0.08); }
+.participant-item.me    { background: rgba(16, 185, 129, 0.1); }
 
 /* Avatar wrapper — holds avatar + online dot */
 .participant-avatar-wrap {
@@ -60,15 +59,15 @@
 }
 
 .participant-avatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: var(--bg5);
+  background: var(--bg3);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text0);
   font-family: var(--font-mono);
   box-sizing: border-box;
@@ -79,13 +78,13 @@
   position: absolute;
   bottom: -1px;
   right: -1px;
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  border: 2px solid var(--bg2);
+  border: 2px solid var(--bg1);
 }
 
-.presence-dot.online  { background: #3fb950; }
+.presence-dot.online  { background: var(--accent); }
 .presence-dot.offline { background: var(--bg5); }
 
 .participant-info {
@@ -93,32 +92,33 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 .participant-name {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text0);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono);
 }
 
 .participant-email {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono);
 }
 
 .participants-empty {
-  padding: 24px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 12px;
   text-align: center;
   color: var(--text2);
   font-size: 13px;
-  font-family: var(--font-mono);
 }

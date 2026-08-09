@@ -1,58 +1,192 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;700&family=Inter:wght@400;500;600;700&display=swap');
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  --bg0: #080a0f;
-  --bg1: #0d0f14;
-  --bg2: #12151b;
-  --bg3: #181c24;
-  --bg4: #1f2330;
-  --bg5: #262b38;
-  --line: #252a36;
-  --line2: #2e3445;
-  --text0: #e4e8f5;
-  --text1: #8c93aa;
-  --text2: #4a5068;
-  --accent: #00e5a0;
-  --accent-dim: rgba(0,229,160,0.12);
-  --red: #ff4d6a;
-  --yellow: #ffd166;
-  --blue: #7cb9ff;
-  --orange: #ff9f43;
-  --purple: #b48eff;
-  --font-ui: 'Syne', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --r: 6px;
-  --r-lg: 10px;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-html, body, #root { height: 100%; overflow: hidden; }
-body { background: var(--bg0); color: var(--text0); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+:root {
+  /* ── Graphite + Lime — CodeRoom Identity ───────────────────── */
+  --bg0: #0A0D0B; /* Main background */
+  --bg1: #0E1210; /* Topbar / Sidebar outer */
+  --bg2: #111613; /* Panel surface */
+  --bg3: #171D19; /* Elevated card / hover base */
+  --bg4: #1E2822; /* Active hover */
+  --bg5: #263028;
 
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 99px; }
+  --line:  #1E2822;
+  --line2: #293830;
 
-button { font-family: var(--font-ui); cursor: pointer; border: none; background: none; }
-input  { font-family: var(--font-mono); outline: none; }
+  --text0: #F2F5EE; /* Primary text */
+  --text1: #9AA69C; /* Muted */
+  --text2: #616E69; /* Dimmed */
 
-.btn-primary { background: var(--accent); color: #000; font-weight: 700; font-size: 14px; padding: 10px 22px; border-radius: var(--r); transition: all .18s ease; }
-.btn-primary:hover { background: #1bffb8; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,229,160,.28); }
-.btn-primary:active { transform: translateY(0); box-shadow: none; }
+  /* ── Lime — The CodeRoom Signature ────────────────────────── */
+  --accent:       #C7F36B;   /* Electric lime — active / selected */
+  --accent-hover: #D9FF85;   /* Hover */
+  --accent-dim:   rgba(199, 243, 107, 0.08); /* Subtle tint */
+  --accent-text:  #0A0D0B;   /* Text on lime background (dark) */
 
-.btn-ghost { color: var(--text1); font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: var(--r); border: 1px solid var(--line); transition: all .18s; }
-.btn-ghost:hover { color: var(--text0); border-color: var(--line2); background: var(--bg4); }
+  /* ── AI Accent — Violet ────────────────────────────────────── */
+  --ai-accent:       #A78BFA;
+  --ai-accent-light: #C4B5FD;
+  --ai-dim:          rgba(167, 139, 250, 0.10);
 
-.btn-icon { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: var(--r); color: var(--text2); font-size: 14px; transition: all .15s; }
+  /* ── Semantic ──────────────────────────────────────────────── */
+  --green:  #8BE28B;
+  --red:    #FF6B6B;
+  --amber:  #F4C95D;
+
+  /* ── Typography ────────────────────────────────────────────── */
+  --font-ui:   'Inter', sans-serif;
+  --font-mono: 'Geist Mono', monospace;
+
+  /* ── Radii ─────────────────────────────────────────────────── */
+  --r:    4px;
+  --r-lg: 8px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg0);
+  color: var(--text0);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--bg5); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--line2); }
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+
+button {
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+
+/* Primary: lime fill */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--r);
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background .15s, transform .1s;
+  white-space: nowrap;
+}
+.btn-primary:hover  { background: var(--accent-hover); }
+.btn-primary:active { transform: scale(0.97); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Ghost: subtle border */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--line2);
+  background: transparent;
+  color: var(--text1);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.btn-ghost:hover  { background: var(--bg4); color: var(--text0); border-color: var(--line2); }
+.btn-ghost:active { transform: scale(0.97); }
+.btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Cancel */
+.btn-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--line2);
+  background: transparent;
+  color: var(--text1);
+  font-size: 13px;
+  transition: all .15s;
+}
+.btn-cancel:hover { background: var(--bg4); color: var(--text0); }
+
+/* Delete */
+.btn-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--r);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  background: rgba(255, 107, 107, 0.1);
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .15s;
+}
+.btn-delete:hover { background: rgba(255, 107, 107, 0.2); }
+
+/* Icon button */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r);
+  border: none;
+  background: transparent;
+  color: var(--text2);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all .15s;
+}
 .btn-icon:hover { background: var(--bg4); color: var(--text0); }
 
-.input-field { width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px; font-size: 13px; color: var(--text0); transition: border-color .2s, box-shadow .2s; }
-.input-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+/* ── Form Inputs ─────────────────────────────────────────────── */
+
+.input-field {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  color: var(--text0);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color .15s;
+}
 .input-field::placeholder { color: var(--text2); }
+.input-field:focus { border-color: var(--accent); }
 
-.label { display: block; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text2); font-family: var(--font-mono); margin-bottom: 6px; }
+.label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text1);
+  margin-bottom: 6px;
+  letter-spacing: 0.03em;
+}
 
-@keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
-@keyframes slideUp { from { opacity: 0; transform: translateY(20px) } to { opacity: 1; transform: translateY(0) } }
-@keyframes blink   { 0%,100% { opacity: 1 } 50% { opacity: 0 } }
+/* ── Animations ──────────────────────────────────────────────── */
+@keyframes fadeIn  { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

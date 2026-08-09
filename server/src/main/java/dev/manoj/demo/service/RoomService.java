@@ -9,11 +9,13 @@ import dev.manoj.demo.repository.RoomParticipantRepository;
 import dev.manoj.demo.repository.RoomRepository;
 import dev.manoj.demo.repository.UserRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.util.UUID;
 
 @Service
+@Transactional
 public class RoomService {
 
     private static final String CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

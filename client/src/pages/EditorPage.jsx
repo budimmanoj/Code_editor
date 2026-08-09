@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Download, Save, LogOut, Code2, Upload, FolderUp, FileCode, Bot, History, Users, Search, Play, RefreshCw, Archive, CheckCircle2, XCircle } from 'lucide-react';
 import { api, tokenStore } from '../api/client';
 import { RoomSocket } from '../websocket/RoomSocket';
 import FileTree from '../components/FileTree';
@@ -83,7 +84,8 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   const [sideTab,      setSideTab]      = useState('files');
   const [error,        setError]        = useState('');
   const [inviteCode,   setInviteCode]   = useState('');
-  const [sidebarWidth, setSidebarWidth] = useState(220);
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [aiPanelWidth, setAiPanelWidth] = useState(300);
   const [viewCodeVersion, setViewCodeVersion] = useState(null);
   const [downloadMsg,  setDownloadMsg]  = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -115,6 +117,60 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   // Keep activeFileRef in sync
   useEffect(() => { activeFileRef.current = activeFile; }, [activeFile]);
+
+  // ── Drag to Resize (Pointer Capture + RAF for smooth 60fps) ─────────────────
+
+  const rafRef = useRef(null);
+
+  const startSidebarDrag = useCallback((e) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (ev) => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        setSidebarWidth(Math.max(160, Math.min(600, ev.clientX)));
+      });
+    };
+    const onUp = () => {
+      handle.releasePointerCapture(e.pointerId);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  }, []);
+
+  const startAiDrag = useCallback((e) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (ev) => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        setAiPanelWidth(Math.max(200, Math.min(800, window.innerWidth - ev.clientX)));
+      });
+    };
+    const onUp = () => {
+      handle.releasePointerCapture(e.pointerId);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  }, []);
 
   // ── Toast helper ───────────────────────────────────────────────────────────
 
@@ -283,6 +339,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   async function saveCode() {
     if (!activeFile) return;
     setSaving(true);
+    setSaveMsg('saving'); // Optimistic visual feedback
     try {
       await api.updateCode({ roomId, fileNodeId: activeFile.id, content: code });
       setSavedCode(code);
@@ -340,11 +397,12 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   // ── Create / Delete / Rename ───────────────────────────────────────────────
 
   async function handleCreate({ name, type, language }) {
+    setModal(null); // Close immediately for optimistic feel
+    const parentId = modal.parentId;
     try {
-      await api.createFileNode({ roomId, parentId: modal.parentId, name, type, language });
-      setModal(null);
+      await api.createFileNode({ roomId, parentId, name, type, language });
       await loadTree();
-    } catch (e) { setError(e.message); setModal(null); }
+    } catch (e) { setError(e.message); }
   }
 
   function requestDelete(id, name, isFolder) { setDeleteConfirm({ id, name, isFolder }); }
@@ -375,6 +433,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     setSaving(true); setError('');
+    addToast('Uploading ' + files.length + ' file(s)...', 'info'); // Immediate feedback
     const skipped = [];
     try {
       for (const file of files) {
@@ -394,6 +453,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     setSaving(true); setError('');
+    addToast('Uploading folder...', 'info'); // Immediate feedback
     const skipped = [];
     try {
       const dirMap = { '': null };
@@ -490,23 +550,6 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFile, code]);
 
-  // ── Sidebar resize ─────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    function handleMouseMove(e) {
-      if (!isResizing.current) return;
-      let w = e.clientX;
-      if (w < 150) w = 150; if (w > 600) w = 600;
-      setSidebarWidth(w);
-    }
-    function handleMouseUp() {
-      if (isResizing.current) { isResizing.current = false; document.body.style.cursor = 'default'; }
-    }
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => { document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); };
-  }, []);
-
   // ── Typing indicator text ──────────────────────────────────────────────────
 
   const typingText = (() => {
@@ -597,20 +640,24 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       {/* ── Topbar ──────────────────────────────────────────────────────── */}
       <header className="topbar">
         <div className="topbar-left">
-          <div className="topbar-logo"><span className="topbar-dot" />CodeRoom</div>
+          <div className="topbar-logo">
+            <Code2 size={16} />
+            CodeRoom
+            <span className="logo-dot" />
+          </div>
           <div className="topbar-room">
             <span className="topbar-room-label">room</span>
             <span className="topbar-room-name">{roomName}</span>
           </div>
+
           <span style={{
-            marginLeft: 10, fontSize: 11, fontWeight: 700, letterSpacing: 1,
+            marginLeft: 8, fontSize: 10, fontWeight: 600, letterSpacing: 1,
             padding: '2px 8px', borderRadius: 4,
             background: isAdmin ? '#7c3aed22' : '#0891b222',
             color: isAdmin ? '#a78bfa' : '#38bdf8',
             textTransform: 'uppercase'
           }}>{userRole}</span>
 
-          {/* WS status */}
           <span className={`ws-dot ${wsConnected ? 'ws-dot--on' : 'ws-dot--off'}`}
             title={wsConnected ? 'Live — connected' : 'Offline — reconnecting'} />
 
@@ -623,170 +670,140 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
           )}
         </div>
 
-        <div className="topbar-right">
-          {/* Online users */}
+        <div className="topbar-center">
           <div className="online-users">
-            {[...onlineUsers.values()].slice(0, 8).map(u => (
+            {[...onlineUsers.values()].slice(0, 5).map(u => (
               <div key={u.userId} className="online-avatar"
                 style={{ background: u.color }} title={u.username}>
                 {u.username.slice(0, 1).toUpperCase()}
               </div>
             ))}
-            {onlineUsers.size > 8 && (
-              <div className="online-avatar" style={{ background: '#484f58' }}>+{onlineUsers.size - 8}</div>
+            {onlineUsers.size > 5 && (
+              <div className="online-avatar" style={{ background: 'var(--bg4)', color: 'var(--text1)' }}>+{onlineUsers.size - 5}</div>
             )}
           </div>
+        </div>
 
-          {isAdmin && inviteCode && (
-            <div className="invite-code-box">
-              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>code</span>
-              <code style={{ color: '#a78bfa', letterSpacing: 2, fontSize: 13, fontWeight: 700 }}>{inviteCode}</code>
-              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12, padding: 0 }}
-                title="Copy invite code" onClick={() => navigator.clipboard.writeText(inviteCode)}>⎘</button>
-            </div>
-          )}
-
+        <div className="topbar-right">
           {downloadMsg && <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{downloadMsg}</span>}
           {saveMsg === 'unsaved' && <span className="save-badge unsaved">● unsaved</span>}
+          {saveMsg === 'saving'  && <span className="save-badge saved">● saving...</span>}
           {saveMsg === 'saved'   && <span className="save-badge saved">✓ saved</span>}
           {saveMsg === 'error'   && <span className="save-badge error-badge">✗ save failed</span>}
 
-          {/* AI Panel toggle */}
-          <button className={`run-btn ai-toggle-btn ${showAiPanel ? 'ai-toggle-btn--active' : ''}`}
+          <button className={`topbar-btn ${showAiPanel ? 'active' : ''}`}
             onClick={() => setShowAiPanel(p => !p)} title="AI Assistant (Ctrl+`)">
-            🤖 AI
+            <Bot size={18} />
           </button>
 
-          {activeFile && (
-            <button className="run-btn" style={{ background: 'var(--bg4)', color: 'var(--text0)' }}
-              title="Download current file" onClick={downloadActiveFile}>⬇ File</button>
-          )}
-
-          <button className="run-btn" style={{ background: 'var(--bg4)', color: 'var(--text0)' }}
-            title="Download workspace as ZIP" onClick={downloadWorkspace} disabled={!tree}>⬇ ZIP</button>
-
-          {/* Review & Save */}
-          {activeFile && (
-            <button className="run-btn review-save-btn" onClick={reviewAndSave}
-              disabled={saving} title="AI Review then save">
-              🔍 Review
-            </button>
-          )}
-
-          <button className="run-btn" onClick={saveCode} disabled={!activeFile || saving}>
-            {saving ? '◌ saving…' : '💾 Save'}
+          <button className="topbar-btn" title="Download workspace as ZIP" onClick={downloadWorkspace} disabled={!tree}>
+            <Archive size={18} />
           </button>
 
-          <div className="topbar-user">
-            <div className="topbar-avatar">{(user.username || user.email || '?').slice(0, 2).toUpperCase()}</div>
-          </div>
-          <button className="leave-btn" onClick={onLeave} title="Leave room">⏻</button>
+          <button className="topbar-btn" onClick={saveCode} disabled={!activeFile || saving} title="Save (Ctrl+S)">
+            <Save size={18} />
+          </button>
+
+          <button className="topbar-btn" onClick={onLeave} title="Leave room">
+            <LogOut size={18} />
+          </button>
         </div>
       </header>
 
       {/* ── Main area ────────────────────────────────────────────────── */}
-      <div className="editor-body">
-        <aside className="sidebar" style={{ width: sidebarWidth }}>
+      <div className="editor-body" style={{ gridTemplateColumns: `${sidebarWidth}px 4px 1fr ${showAiPanel ? `4px ${aiPanelWidth}px` : ''}` }}>
+        <aside className="sidebar">
           <div className="sidebar-tabs">
             <button className={`sidebar-tab ${sideTab === 'files'   ? 'active' : ''}`}
-              onClick={() => setSideTab('files')} title="Files">⎘</button>
+              onClick={() => setSideTab('files')} title="Files"><FileCode size={20} /></button>
             <button className={`sidebar-tab ${sideTab === 'history' ? 'active' : ''}`}
               onClick={() => { setSideTab('history'); if (activeFile) loadVersions(activeFile.id); }}
-              title="History">🕒</button>
+              title="History"><History size={20} /></button>
             <button className={`sidebar-tab ${sideTab === 'people'  ? 'active' : ''}`}
-              onClick={() => setSideTab('people')} title="Participants">◉</button>
+              onClick={() => setSideTab('people')} title="Participants"><Users size={20} /></button>
           </div>
 
           <div className="sidebar-content">
             {/* Files tab */}
-            {sideTab === 'files' && (
-              <>
-                <div className="sidebar-header">
-                  <span className="sidebar-title">Explorer</span>
-                  <div className="sidebar-actions" style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn-icon" title="Upload Files" onClick={() => fileInputRef.current.click()}>📄↑</button>
-                    <button className="btn-icon" title="Upload Folder" onClick={() => folderInputRef.current.click()}>📁↑</button>
-                    <button className="btn-icon" title="Download ZIP" onClick={downloadWorkspace}>⬇</button>
-                    <button className="btn-icon" title="Refresh" onClick={loadTree}>↺</button>
-                  </div>
+            <div className={sideTab === 'files' ? '' : 'hide'}>
+              <div className="sidebar-header">
+                <span className="sidebar-title">Explorer</span>
+                <div className="sidebar-actions" style={{ display: 'flex', gap: 4 }}>
+                  <button className="btn-icon" title="Upload Files" onClick={() => fileInputRef.current.click()}><Upload size={14} /></button>
+                  <button className="btn-icon" title="Upload Folder" onClick={() => folderInputRef.current.click()}><FolderUp size={14} /></button>
+                  <button className="btn-icon" title="Refresh" onClick={loadTree}><RefreshCw size={14} /></button>
                 </div>
-                {error && (
-                  <div className="sidebar-error">
-                    {error}
-                    <button style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-                      onClick={() => setError('')}>✕</button>
-                  </div>
-                )}
-                <FileTree
-                  tree={tree}
-                  selectedId={activeFile?.id}
-                  onSelect={selectFile}
-                  onAddFile={(parentId) => setModal({ type: 'FILE', parentId })}
-                  onAddFolder={(parentId) => setModal({ type: 'FOLDER', parentId })}
-                  onDelete={requestDelete}
-                  onRename={handleRename}
-                />
-              </>
-            )}
+              </div>
+              {error && (
+                <div className="sidebar-error">
+                  {error}
+                  <button style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+                    onClick={() => setError('')}>✕</button>
+                </div>
+              )}
+              <FileTree
+                tree={tree}
+                selectedId={activeFile?.id}
+                onSelect={selectFile}
+                onAddFile={(parentId) => setModal({ type: 'FILE', parentId })}
+                onAddFolder={(parentId) => setModal({ type: 'FOLDER', parentId })}
+                onDelete={requestDelete}
+                onRename={handleRename}
+              />
+            </div>
 
             {/* History tab */}
-            {sideTab === 'history' && (
-              <>
-                <div className="sidebar-header">
-                  <span className="sidebar-title">History</span>
-                  <button className="btn-icon" title="Refresh"
-                    onClick={() => activeFile && loadVersions(activeFile.id)}>↺</button>
-                </div>
-                {!activeFile
-                  ? <div style={{ padding: 12, color: 'var(--text-muted)', fontSize: 12 }}>Open a file to see its history.</div>
-                  : (
-                    <div className="history-list">
-                      {versions.map(v => (
-                        <div key={v.id} className="history-item">
-                          <div className="history-header">
-                            <span className="history-user">{v.username}</span>
-                            <span className={`history-status ${v.status}`}>{v.status.replace('_', ' ')}</span>
-                          </div>
-                          <div className="history-time">{new Date(v.createdAt).toLocaleString()}</div>
-                          {v.reviewedBy && (
-                            <div className="history-reviewer">Reviewed by {v.reviewedBy} on {new Date(v.reviewedAt).toLocaleString()}</div>
-                          )}
-                          <div className="history-actions">
-                            <button className="history-btn revert" onClick={() => setViewCodeVersion(v)}>View</button>
-                            <button className="history-btn revert" onClick={() => revertToVersion(v.id)}>Revert</button>
-                            {isAdmin && (
-                              <>
-                                <button className="history-btn review" onClick={() => reviewVersion(v.id, 'REVIEWED')}>✓</button>
-                                <button className="history-btn no-change" onClick={() => reviewVersion(v.id, 'NO_CHANGE')}>✗</button>
-                              </>
-                            )}
-                          </div>
+            <div className={sideTab === 'history' ? '' : 'hide'} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div className="sidebar-header">
+                <span className="sidebar-title">History</span>
+                <button className="btn-icon" title="Refresh"
+                  onClick={() => activeFile && loadVersions(activeFile.id)}><RefreshCw size={14} /></button>
+              </div>
+              {!activeFile
+                ? <div style={{ padding: 12, color: 'var(--text1)', fontSize: 12 }}>Open a file to see its history.</div>
+                : (
+                  <div className="history-list">
+                    {versions.map(v => (
+                      <div key={v.id} className="history-item">
+                        <div className="history-header">
+                          <span className="history-user">{v.username}</span>
+                          <span className={`history-status ${v.status}`}>{v.status.replace('_', ' ')}</span>
                         </div>
-                      ))}
-                    </div>
-                  )
-                }
-              </>
-            )}
+                        <div className="history-time">{new Date(v.createdAt).toLocaleString()}</div>
+                        {v.reviewedBy && (
+                          <div className="history-reviewer">Reviewed by {v.reviewedBy} on {new Date(v.reviewedAt).toLocaleString()}</div>
+                        )}
+                        <div className="history-actions">
+                          <button className="history-btn revert" onClick={() => setViewCodeVersion(v)}>View</button>
+                          <button className="history-btn revert" onClick={() => revertToVersion(v.id)}>Revert</button>
+                          {isAdmin && (
+                            <>
+                              <button className="history-btn review" title="Mark as Reviewed" onClick={() => reviewVersion(v.id, 'REVIEWED')}><CheckCircle2 size={12} /></button>
+                              <button className="history-btn no-change" title="Mark as No Change" onClick={() => reviewVersion(v.id, 'NO_CHANGE')}><XCircle size={12} /></button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+            </div>
 
             {/* People tab */}
-            {sideTab === 'people' && (
+            <div className={sideTab === 'people' ? '' : 'hide'}>
               <Participants
                 participants={participants}
                 roomId={roomId}
                 currentUserId={user.id}
                 onlineUsers={onlineUsers}
               />
-            )}
+            </div>
           </div>
         </aside>
 
-        <div className="resize-handle"
-          onMouseDown={e => {
-            e.preventDefault();
-            isResizing.current = true;
-            document.body.style.cursor = 'col-resize';
-          }} />
+        {/* Sidebar Drag Handle */}
+        <div className="drag-handle" onPointerDown={startSidebarDrag} />
 
         <main className="editor-main">
           {activeFile ? (
@@ -795,7 +812,9 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                 <div className="editor-tab active">
                   <span className="editor-tab-name">{activeFile.name}</span>
                   {isDirty && <span className="dirty-dot" />}
-                  <button className="tab-download-btn" title="Download file" onClick={downloadActiveFile}>⬇</button>
+                  <button className="tab-download-btn" title="Download file" onClick={downloadActiveFile}>
+                    <Download size={12} />
+                  </button>
                 </div>
                 {typingText && (
                   <div className="typing-indicator">{typingText}</div>
@@ -811,49 +830,33 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
             </>
           ) : (
             <div className="empty-editor">
-              <div className="empty-icon">◆</div>
+              <FileCode size={48} className="empty-icon" />
               <p className="empty-title">No file open</p>
-              <p className="empty-sub">Select a file from the explorer, upload from your system, or create a new one.</p>
+              <p className="empty-sub">Select a file from the explorer or create a new one.</p>
               <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                <button className="run-btn" style={{ fontSize: 12 }} onClick={() => fileInputRef.current.click()}>📄 Upload File</button>
-                <button className="run-btn" style={{ fontSize: 12 }} onClick={() => folderInputRef.current.click()}>📁 Upload Folder</button>
+                <button className="btn-primary" onClick={() => setModal({ type: 'FILE', parentId: null })}>New File</button>
+                <button className="btn-ghost" onClick={() => fileInputRef.current.click()}>Upload File</button>
               </div>
             </div>
           )}
         </main>
 
-        {/* AI Panel */}
+        {/* AI Panel: drag handle + panel, only rendered when open */}
         {showAiPanel && (
-          <AiPanel
-            code={code}
-            language={activeFile?.language || 'plaintext'}
-            filename={activeFile?.name || ''}
-            roomId={roomId}
-            fileNodeId={activeFile?.id}
-            onInsertCode={handleInsertAiCode}
-            onClose={() => setShowAiPanel(false)}
-          />
-        )}
-      </div>
-
-      <footer className="statusbar">
-        <span className="status-item accent">◆ CodeRoom</span>
-        {activeFile && (
           <>
-            <span className="status-sep">|</span>
-            <span className="status-item">{activeFile.language || 'plaintext'}</span>
-            <span className="status-sep">|</span>
-            <span className="status-item">{activeFile.name}</span>
+            <div className="drag-handle" onPointerDown={startAiDrag} />
+            <AiPanel
+              code={code}
+              language={activeFile?.language || 'plaintext'}
+              filename={activeFile?.name || ''}
+              roomId={roomId}
+              fileNodeId={activeFile?.id}
+              onInsertCode={handleInsertAiCode}
+              onClose={() => setShowAiPanel(false)}
+            />
           </>
         )}
-        <span className="status-item" style={{ marginLeft: 'auto', marginRight: 8 }}>
-          {wsConnected
-            ? <><span style={{ color: '#3fb950' }}>●</span> Live</>
-            : <><span style={{ color: '#f85149' }}>●</span> Reconnecting</>
-          }
-        </span>
-        <span className="status-right">{saving ? 'Saving…' : 'Ctrl+S · Ctrl+` for AI'}</span>
-      </footer>
+      </div>
     </div>
   );
 }

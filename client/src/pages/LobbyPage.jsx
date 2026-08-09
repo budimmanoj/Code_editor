@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { User, LogOut, ArrowLeft, Shield, Users, Lightbulb, Code2 } from 'lucide-react';
 import { api } from '../api/client';
 import './LobbyPage.css';
 
@@ -56,17 +57,19 @@ export default function LobbyPage({ user, onEnterRoom, onLogout }) {
         {/* Header */}
         <div className="lobby-header">
           <div className="lobby-logo">
-            <span className="lobby-dot" />
+            <Code2 size={20} />
             CodeRoom
           </div>
           <div className="lobby-user">
             <div className="user-avatar">{initials}</div>
             <span className="user-name">{user.username || user.email}</span>
-            <button className="lobby-tab-btn" style={{ marginLeft: 8 }}
-              onClick={() => setTab(tab === 'profile' ? 'lobby' : 'profile')}>
-              {tab === 'profile' ? '← Back' : 'Profile'}
+            <button className="lobby-tab-btn" onClick={() => setTab(tab === 'profile' ? 'lobby' : 'profile')}>
+              {tab === 'profile' ? <><ArrowLeft size={16} /> Back</> : <><User size={16} /> Profile</>}
             </button>
-            <button className="logout-btn" onClick={onLogout}>logout</button>
+            <button className="logout-btn" onClick={onLogout}>
+              <LogOut size={16} />
+              Logout
+            </button>
           </div>
         </div>
 
@@ -112,57 +115,63 @@ export default function LobbyPage({ user, onEnterRoom, onLogout }) {
             </div>
 
             <div className="lobby-hint">
-              💡 Share the 8-char invite code with teammates so they can join
+              <Lightbulb size={16} />
+              Share the 8-char invite code with teammates so they can join
             </div>
           </>
         ) : (
-          <ProfilePanel profile={profile} onEnterRoom={enterExistingRoom} />
+          <ProfilePanel user={user} profile={profile} onEnterRoom={enterExistingRoom} />
         )}
       </div>
     </div>
   );
 }
 
-function ProfilePanel({ profile, onEnterRoom }) {
-  if (!profile) return <div style={{ color: 'var(--text-muted)', padding: 24 }}>Loading profile…</div>;
-
+function ProfilePanel({ user, profile, onEnterRoom }) {
   return (
     <div>
-      <h2 style={{ color: 'var(--text)', marginBottom: 24 }}>
-        👤 {profile.username} <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>{profile.email}</span>
-      </h2>
+      <div className="profile-header">
+        <User size={32} color="var(--accent)" />
+        <div>
+          <div className="lobby-title" style={{ marginBottom: 4 }}>{user.username || user.email}</div>
+          <div className="profile-email">{user.email}</div>
+        </div>
+      </div>
 
-      <RoomList title="🛡 Rooms I Created (Admin)" rooms={profile.roomsCreated} onEnter={onEnterRoom} badgeColor="#7c3aed" />
-      <RoomList title="👥 Rooms I'm a Member Of" rooms={profile.roomsJoined} onEnter={onEnterRoom} badgeColor="#0891b2" />
+      {!profile ? (
+        <div style={{ color: 'var(--text2)', padding: '24px 0', fontSize: 13 }}>Loading workspace history...</div>
+      ) : (
+        <>
+          <RoomList title="Rooms I Created (Admin)" icon={<Shield size={16} />} rooms={profile.roomsCreated} onEnter={onEnterRoom} />
+          <RoomList title="Rooms I'm a Member Of" icon={<Users size={16} />} rooms={profile.roomsJoined} onEnter={onEnterRoom} />
+        </>
+      )}
     </div>
   );
 }
 
-function RoomList({ title, rooms, onEnter, badgeColor }) {
+function RoomList({ title, icon, rooms, onEnter }) {
   return (
-    <div style={{ marginBottom: 28 }}>
-      <div style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 600,
-        textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 }}>{title}</div>
+    <div className="room-list-group">
+      <div className="room-list-title">
+        {icon}
+        {title}
+      </div>
       {rooms.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>None yet</div>
+        <div className="room-list-empty">None yet</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="room-list-container">
           {rooms.map(r => (
-            <div key={r.id} style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: 'var(--surface)', borderRadius: 8, padding: '10px 14px',
-              border: '1px solid var(--border)'
-            }}>
-              <div>
-                <span style={{ color: 'var(--text)', fontWeight: 600, marginRight: 10 }}>{r.name}</span>
-                <code style={{ background: 'var(--bg)', color: badgeColor, fontSize: 12,
-                  padding: '2px 6px', borderRadius: 4, letterSpacing: 2 }}>{r.inviteCode}</code>
-                <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 10 }}>
+            <div key={r.id} className="room-row">
+              <div className="room-row-left">
+                <span className="room-name">{r.name}</span>
+                <span className="room-code">{r.inviteCode}</span>
+                <span className="room-members">
+                  <Users size={14} />
                   {r.participantCount} member{r.participantCount !== 1 ? 's' : ''}
                 </span>
               </div>
-              <button className="btn-ghost" style={{ padding: '4px 12px', fontSize: 13 }}
-                onClick={() => onEnter(r.id, r.name)}>
+              <button className="btn-ghost" onClick={() => onEnter(r.id, r.name)}>
                 Enter →
               </button>
             </div>

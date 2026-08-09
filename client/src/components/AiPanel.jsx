@@ -1,252 +1,197 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Bot, X, Send, Copy, ArrowLeftToLine, Paperclip, AlertCircle } from 'lucide-react';
 import { api } from '../api/client';
 import './AiPanel.css';
 
-const TABS = [
-  { id: 'review',              icon: '🔍', label: 'Review',        desc: 'Analyze code quality, bugs & best practices' },
-  { id: 'explain',             icon: '💡', label: 'Explain',       desc: 'Understand what this code does' },
-  { id: 'refactor',            icon: '♻️', label: 'Refactor',      desc: 'Improve structure & readability' },
-  { id: 'debug',               icon: '🐛', label: 'Debug',         desc: 'Find & fix errors with stack trace' },
-  { id: 'optimize',            icon: '⚡', label: 'Optimize',      desc: 'Improve performance & complexity' },
-  { id: 'generate',            icon: '✨', label: 'Generate',      desc: 'Create code from natural language' },
-  { id: 'tests',               icon: '🧪', label: 'Tests',         desc: 'Generate unit tests automatically' },
-  { id: 'docs',                icon: '📄', label: 'Docs',          desc: 'Generate documentation & comments' },
-  { id: 'commit-message',      icon: '📝', label: 'Commit Msg',    desc: 'Generate a Git commit message' },
-  { id: 'security',            icon: '🔒', label: 'Security',      desc: 'Scan for vulnerabilities' },
-  { id: 'chat',                icon: '💬', label: 'Chat',          desc: 'Ask anything about your code' },
+const MODES = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'generate', label: 'Generate Code' },
+  { id: 'review', label: 'Review Code' },
+  { id: 'explain', label: 'Explain Code' },
+  { id: 'refactor', label: 'Refactor' },
+  { id: 'debug', label: 'Debug' },
+  { id: 'optimize', label: 'Optimize' },
+  { id: 'tests', label: 'Generate Tests' },
+  { id: 'docs', label: 'Generate Docs' },
+  { id: 'commit-message', label: 'Commit Message' },
+  { id: 'security', label: 'Security Scan' },
 ];
 
 const APPLIES_TO_EDITOR = new Set(['refactor', 'generate', 'optimize', 'docs', 'debug']);
 
-/**
- * AI Assistant Panel — slide-in right panel for the Editor.
- *
- * Props:
- *   code        current editor content
- *   language    detected language
- *   filename    active file name
- *   roomId      room UUID (for server-side code fetch)
- *   fileNodeId  file UUID
- *   onInsertCode  (newCode: string) => void  — replace editor content
- *   onClose     () => void
- */
 export default function AiPanel({ code, language, filename, roomId, fileNodeId, onInsertCode, onClose }) {
-  const [tab, setTab]               = useState('review');
-  const [loading, setLoading]       = useState(false);
-  const [result, setResult]         = useState('');
-  const [error, setError]           = useState('');
-  const [copied, setCopied]         = useState(false);
+  const [currentMode, setCurrentMode] = useState('chat');
+  const [input, setInput] = useState('');
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const messagesEndRef = useRef(null);
 
-  // Tab-specific inputs
-  const [debugError, setDebugError]       = useState('');
-  const [generatePrompt, setGenPrompt]    = useState('');
-  const [commitChanges, setCommitChanges] = useState('');
-  const [chatMessage, setChatMessage]     = useState('');
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [history, loading]);
 
-  const currentTab = TABS.find(t => t.id === tab) || TABS[0];
-
-  const buildPayload = useCallback(() => {
+  const buildPayload = (mode, text) => {
     const base = { code, language, roomId, fileNodeId, filename };
-    switch (tab) {
-      case 'debug':          return { ...base, error: debugError };
-      case 'generate':       return { ...base, prompt: generatePrompt };
-      case 'commit-message': return { ...base, changes: commitChanges };
-      case 'chat':           return { ...base, message: chatMessage };
-      default:               return base;
+    switch (mode) {
+      case 'debug': return { ...base, error: text };
+      case 'generate': return { ...base, prompt: text };
+      case 'commit-message': return { ...base, changes: text };
+      case 'chat': return { ...base, message: text };
+      default: return base;
     }
-  }, [tab, code, language, roomId, fileNodeId, filename, debugError, generatePrompt, commitChanges, chatMessage]);
+  };
 
-  async function runAi() {
-    if (tab === 'chat' && !chatMessage.trim()) return;
-    if (tab === 'generate' && !generatePrompt.trim()) return;
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text && ['chat', 'generate', 'debug', 'commit-message'].includes(currentMode)) {
+      return; // Require input for these modes
+    }
 
+    const modeObj = MODES.find(m => m.id === currentMode);
+    const userMessage = text || `Triggered: ${modeObj.label}`;
+    
+    // Optimistically add user message
+    const newHistory = [...history, { role: 'user', content: userMessage }];
+    setHistory(newHistory);
+    setInput('');
     setLoading(true);
     setError('');
-    setResult('');
+
     try {
-      const resp = await api.aiCall(tab, buildPayload());
-      setResult(resp.result || '');
+      const resp = await api.aiCall(currentMode, buildPayload(currentMode, text));
+      setHistory(prev => [...prev, { 
+        role: 'ai', 
+        content: resp.result || 'No response.', 
+        mode: currentMode 
+      }]);
     } catch (err) {
-      setError(err.message || 'AI request failed. Check your GEMINI_API_KEY.');
+      setError(err.message || 'AI request failed.');
+      // Remove the optimistic user message if we failed immediately
+      setHistory(newHistory.slice(0, -1));
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      runAi();
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
-  }
+  };
 
-  function copyResult() {
-    navigator.clipboard.writeText(result).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  function applyToEditor() {
-    if (result && onInsertCode) {
-      // Extract code block if present, otherwise use full result
-      const codeBlockMatch = result.match(/```(?:\w+)?\n([\s\S]*?)```/);
-      const codeToInsert = codeBlockMatch ? codeBlockMatch[1] : result;
+  const applyToEditor = (content) => {
+    if (content && onInsertCode) {
+      const codeBlockMatch = content.match(/```(?:\w+)?\n([\s\S]*?)```/);
+      const codeToInsert = codeBlockMatch ? codeBlockMatch[1] : content;
       onInsertCode(codeToInsert.trim());
     }
-  }
+  };
 
-  function switchTab(newTab) {
-    setTab(newTab);
-    setResult('');
-    setError('');
-  }
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+  };
 
-  const hasResult = result.length > 0;
-  const canApply = hasResult && APPLIES_TO_EDITOR.has(tab) && onInsertCode;
-  const needsCode = !code && !['generate', 'chat'].includes(tab);
+  const needsCode = !code && !['generate', 'chat'].includes(currentMode);
 
   return (
     <div className="ai-panel">
-      {/* Header */}
       <div className="ai-panel-header">
         <div className="ai-panel-title">
-          <span className="ai-panel-icon">🤖</span>
+          <Bot size={16} />
           <span>AI Assistant</span>
         </div>
-        <button className="ai-close-btn" onClick={onClose} title="Close AI Panel">✕</button>
-      </div>
-
-      {/* Tab bar */}
-      <div className="ai-tabs">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`ai-tab ${tab === t.id ? 'ai-tab--active' : ''}`}
-            onClick={() => switchTab(t.id)}
-            title={t.label}
-          >
-            <span className="ai-tab-icon">{t.icon}</span>
-            <span className="ai-tab-label">{t.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Body */}
-      <div className="ai-panel-body">
-        <p className="ai-tab-desc">{currentTab.desc}</p>
-
-        {/* File context pill */}
-        {filename && (
-          <div className="ai-context-pill">
-            <span className="ai-context-icon">📎</span>
-            <span>{filename}</span>
-            {language && <span className="ai-lang-badge">{language}</span>}
-          </div>
-        )}
-
-        {needsCode && (
-          <div className="ai-warning">
-            ⚠️ Open a file in the editor to use this feature.
-          </div>
-        )}
-
-        {/* Tab-specific inputs */}
-        {tab === 'debug' && (
-          <div className="ai-input-group">
-            <label className="ai-label">Error / Stack Trace (optional)</label>
-            <textarea
-              className="ai-textarea"
-              value={debugError}
-              onChange={e => setDebugError(e.target.value)}
-              placeholder="Paste the error message or stack trace here..."
-              rows={4}
-            />
-          </div>
-        )}
-
-        {tab === 'generate' && (
-          <div className="ai-input-group">
-            <label className="ai-label">What would you like to generate? <span className="ai-required">*</span></label>
-            <textarea
-              className="ai-textarea"
-              value={generatePrompt}
-              onChange={e => setGenPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="e.g. A function that sorts a list of users by age and name..."
-              rows={4}
-            />
-            <span className="ai-hint">Ctrl+Enter to run</span>
-          </div>
-        )}
-
-        {tab === 'commit-message' && (
-          <div className="ai-input-group">
-            <label className="ai-label">What changed? (optional)</label>
-            <textarea
-              className="ai-textarea"
-              value={commitChanges}
-              onChange={e => setCommitChanges(e.target.value)}
-              placeholder="e.g. Added user authentication with JWT tokens..."
-              rows={3}
-            />
-          </div>
-        )}
-
-        {tab === 'chat' && (
-          <div className="ai-input-group">
-            <label className="ai-label">Ask anything <span className="ai-required">*</span></label>
-            <textarea
-              className="ai-textarea"
-              value={chatMessage}
-              onChange={e => setChatMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="e.g. Why is this function O(n²)? How can I improve it?"
-              rows={4}
-            />
-            <span className="ai-hint">Ctrl+Enter to send</span>
-          </div>
-        )}
-
-        {/* Run button */}
-        <button
-          className="ai-run-btn"
-          onClick={runAi}
-          disabled={loading || needsCode}
-        >
-          {loading
-            ? <><span className="ai-spinner" /> Thinking...</>
-            : <>{currentTab.icon} {currentTab.label}</>
-          }
+        <button className="ai-close-btn" onClick={onClose} title="Close Panel">
+          <X size={16} />
         </button>
+      </div>
 
-        {/* Error */}
+      {filename && (
+        <div className="ai-context-pill">
+          <Paperclip size={14} />
+          <span>{filename}</span>
+          {language && <span className="ai-lang-badge">{language}</span>}
+        </div>
+      )}
+
+      <div className="ai-panel-body">
+        {history.length === 0 ? (
+          <div style={{ color: 'var(--text2)', fontSize: 13, textAlign: 'center', marginTop: 32 }}>
+            <Bot size={32} style={{ opacity: 0.2, marginBottom: 16 }} />
+            <p>How can I help with your code today?</p>
+          </div>
+        ) : (
+          history.map((msg, idx) => (
+            <div key={idx} className={`chat-message ${msg.role}`}>
+              <div className="chat-bubble">
+                {msg.role === 'ai' ? (
+                  // Simple pre-wrap formatting for AI response
+                  // In a real app, you'd use a Markdown renderer here
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                ) : (
+                  msg.content
+                )}
+              </div>
+              
+              {msg.role === 'ai' && (
+                <div className="chat-actions">
+                  <button className="chat-action-btn" onClick={() => copyToClipboard(msg.content)} title="Copy Response">
+                    <Copy size={12} /> Copy
+                  </button>
+                  {APPLIES_TO_EDITOR.has(msg.mode) && onInsertCode && (
+                    <button className="chat-action-btn apply" onClick={() => applyToEditor(msg.content)} title="Apply to Editor">
+                      <ArrowLeftToLine size={12} /> Apply
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+        
+        {loading && (
+          <div className="ai-loading">
+            <span className="ai-spinner" /> AI is thinking...
+          </div>
+        )}
+        
         {error && (
           <div className="ai-error">
-            <span>⚠️</span> {error}
+            <AlertCircle size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> 
+            {error}
           </div>
         )}
+        <div ref={messagesEndRef} />
+      </div>
 
-        {/* Result */}
-        {hasResult && (
-          <div className="ai-result-section">
-            <div className="ai-result-header">
-              <span className="ai-result-label">Result</span>
-              <div className="ai-result-actions">
-                {canApply && (
-                  <button className="ai-action-btn ai-action-btn--apply" onClick={applyToEditor}>
-                    ⬅ Apply to Editor
-                  </button>
-                )}
-                <button className="ai-action-btn" onClick={copyResult}>
-                  {copied ? '✅ Copied!' : '📋 Copy'}
-                </button>
-              </div>
-            </div>
-            <div className="ai-result">
-              <pre className="ai-result-text">{result}</pre>
-            </div>
-          </div>
-        )}
+      <div className="ai-input-area">
+        <select 
+          className="ai-mode-select"
+          value={currentMode}
+          onChange={(e) => setCurrentMode(e.target.value)}
+        >
+          {MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+        </select>
+        
+        <div className="ai-input-wrapper">
+          <textarea
+            className="ai-textarea"
+            placeholder={needsCode ? "Open a file first to use this mode" : "Ask anything (Press Enter to send)..."}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={needsCode || loading}
+          />
+          <button 
+            className="ai-send-btn" 
+            onClick={handleSend}
+            disabled={needsCode || loading || (!input.trim() && ['chat', 'generate', 'debug', 'commit-message'].includes(currentMode))}
+          >
+            <Send size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );
