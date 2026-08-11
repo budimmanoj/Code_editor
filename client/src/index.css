@@ -10,30 +10,30 @@
 
 :root {
   /* ── Graphite + Lime — CodeRoom Identity ───────────────────── */
-  --bg0: #0A0D0B; /* Main background */
-  --bg1: #0E1210; /* Topbar / Sidebar outer */
-  --bg2: #111613; /* Panel surface */
-  --bg3: #171D19; /* Elevated card / hover base */
-  --bg4: #1E2822; /* Active hover */
-  --bg5: #263028;
+  --bg0: #F8FAF9; /* Main background */
+  --bg1: #FFFFFF; /* Topbar / Sidebar outer */
+  --bg2: #F1F4F2; /* Panel surface */
+  --bg3: #E9ECEB; /* Elevated card / hover base */
+  --bg4: #DEE3E0; /* Active hover */
+  --bg5: #D0D6D3;
 
-  --line:  #1E2822;
-  --line2: #293830;
+  --line:  #E2E8E4;
+  --line2: #D1D9D4;
 
-  --text0: #F2F5EE; /* Primary text */
-  --text1: #9AA69C; /* Muted */
-  --text2: #616E69; /* Dimmed */
+  --text0: #1C2320; /* Primary text */
+  --text1: #5C6963; /* Muted */
+  --text2: #899690; /* Dimmed */
 
   /* ── Lime — The CodeRoom Signature ────────────────────────── */
-  --accent:       #C7F36B;   /* Electric lime — active / selected */
-  --accent-hover: #D9FF85;   /* Hover */
-  --accent-dim:   rgba(199, 243, 107, 0.08); /* Subtle tint */
-  --accent-text:  #0A0D0B;   /* Text on lime background (dark) */
+  --accent:       #5C9E19;   /* Deeper green for light mode contrast */
+  --accent-hover: #4F8915;   /* Hover */
+  --accent-dim:   rgba(92, 158, 25, 0.15); /* Subtle tint */
+  --accent-text:  #FFFFFF;   /* Text on lime background (light) */
 
   /* ── AI Accent — Violet ────────────────────────────────────── */
-  --ai-accent:       #A78BFA;
-  --ai-accent-light: #C4B5FD;
-  --ai-dim:          rgba(167, 139, 250, 0.10);
+  --ai-accent:       #7C3AED;
+  --ai-accent-light: #8B5CF6;
+  --ai-dim:          rgba(124, 58, 237, 0.10);
 
   /* ── Semantic ──────────────────────────────────────────────── */
   --green:  #8BE28B;
@@ -113,6 +113,25 @@ button {
 .btn-ghost:hover  { background: var(--bg4); color: var(--text0); border-color: var(--line2); }
 .btn-ghost:active { transform: scale(0.97); }
 .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Secondary */
+.btn-secondary {
+  width: 50%;
+  padding: 6px;
+  margin-top: 2px;
+  border-radius: var(--r);
+  font-size: 12px;
+  letter-spacing: .02em;
+  border: 1px solid var(--line);
+  color: white;
+  background: green;
+  cursor: pointer;
+  transition: all .2s;
+}
+.btn-secondary:hover {
+  background: white;
+  color: var(--text0);
+}
 
 /* Cancel */
 .btn-cancel {

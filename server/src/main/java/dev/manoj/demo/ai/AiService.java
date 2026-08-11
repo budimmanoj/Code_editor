@@ -1,6 +1,9 @@
 package dev.manoj.demo.ai;
 
+import dev.manoj.demo.dto.AiRequestDto;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
  * Builds task-specific prompts and delegates to the configured AiProvider.
@@ -236,6 +239,148 @@ public class AiService {
                 
                 Question: %s
                 """.formatted(contextPart, message));
+    }
+
+    /**
+     * Workspace-aware chat: gives the AI rich context about the active file
+     * and workspace structure, and instructs it to respond in structured JSON.
+     *
+     * The AI can respond in two ways:
+     *
+     * 1. Plain text answer:
+     *    {"type":"TEXT","result":"..."}
+     *
+     * 2. File action (CREATE_FILE, UPDATE_FILE):
+     *    {"type":"ACTION","action":{"type":"CREATE_FILE","fileName":"sum.cpp","language":"cpp","content":"..."}}
+     *    {"type":"ACTION","action":{"type":"UPDATE_FILE","fileId":"...","fileNameForDisplay":"code.js","newContent":"..."}}
+     */
+    public String workspaceChat(AiRequestDto dto) {
+        String message = dto.getMessage() != null ? dto.getMessage() : "";
+
+        // Build active file context section
+        String activeFileSection = buildActiveFileSection(dto);
+
+        // Build workspace tree section (compact — names + types only, no content)
+        String workspaceSection = buildWorkspaceSection(dto);
+
+        // Build additional referenced files section
+        String additionalFilesSection = buildAdditionalFilesSection(dto);
+
+        return aiProvider.complete("""
+                You are an expert programming assistant embedded in CodeRoom, a collaborative code editor.
+                You have access to the user's workspace and can read files and propose file operations.
+                
+                ## WORKSPACE CONTEXT
+                %s
+                %s
+                %s
+                
+                ## YOUR CAPABILITIES
+                You can respond in two formats ONLY:
+                
+                ### 1. Text answer (for explanations, questions, reviews):
+                Return ONLY valid JSON:
+                {"type":"TEXT","result":"your answer here (can include markdown)"}
+                
+                ### 2. File action (when user asks to create or modify a file):
+                
+                For CREATE_FILE:
+                {"type":"ACTION","action":{"type":"CREATE_FILE","fileName":"example.cpp","language":"cpp","content":"// full file content here"}}
+                
+                For UPDATE_FILE (propose full replacement of active file):
+                {"type":"ACTION","action":{"type":"UPDATE_FILE","fileId":"%s","fileNameForDisplay":"%s","newContent":"// complete new file content"}}
+                
+                ## IMPORTANT RULES
+                - ALWAYS respond with valid JSON — never plain text outside JSON
+                - For TEXT responses, escape special characters properly in the JSON string
+                - For file content in JSON, escape newlines as \\n and quotes as \\"
+                - When the user asks what code is in a file, describe it based on the ACTIVE FILE CONTEXT above
+                - When the user asks to CREATE a file, use CREATE_FILE action
+                - When the user asks to MODIFY/UPDATE/ADD TO the current file, use UPDATE_FILE action with the complete new content
+                - Never make up file IDs — use only the IDs provided above
+                - If unsure whether to create or modify, ask the user (use TEXT type)
+                
+                ## USER MESSAGE
+                %s
+                """.formatted(
+                        activeFileSection,
+                        workspaceSection,
+                        additionalFilesSection,
+                        dto.getFileNodeId() != null ? dto.getFileNodeId().toString() : "null",
+                        dto.getActiveFileName() != null ? dto.getActiveFileName() : "current file",
+                        message));
+    }
+
+    private String buildActiveFileSection(AiRequestDto dto) {
+        if (dto.getCode() == null || dto.getCode().isBlank()) {
+            return "### Active File\nNo file is currently open in the editor.";
+        }
+
+        String name = dto.getActiveFileName() != null ? dto.getActiveFileName() : (dto.getFilename() != null ? dto.getFilename() : "unknown");
+        String lang = dto.getLanguage() != null ? dto.getLanguage() : "plaintext";
+        String content = dto.getCode();
+        if (content.length() > 4000) {
+            content = content.substring(0, 4000) + "\n... (truncated — file continues)";
+        }
+
+        return """
+                ### Active File
+                Name: %s
+                Language: %s
+                File ID: %s
+                
+                Content:
+                ```%s
+                %s
+                ```""".formatted(
+                name, lang,
+                dto.getFileNodeId() != null ? dto.getFileNodeId().toString() : "N/A",
+                lang, content);
+    }
+
+    private String buildWorkspaceSection(AiRequestDto dto) {
+        List<AiRequestDto.WorkspaceFileInfo> tree = dto.getWorkspaceTree();
+        if (tree == null || tree.isEmpty()) {
+            return "### Workspace\nWorkspace tree not available.";
+        }
+
+        StringBuilder sb = new StringBuilder("### Workspace Structure\n");
+        // Limit to 80 files to avoid excessive token usage
+        int limit = Math.min(tree.size(), 80);
+        for (int i = 0; i < limit; i++) {
+            AiRequestDto.WorkspaceFileInfo f = tree.get(i);
+            String icon = "FILE".equals(f.getType()) ? "📄" : "📁";
+            sb.append(icon).append(" ").append(f.getPath() != null ? f.getPath() : f.getName());
+            if (f.getLanguage() != null && !f.getLanguage().isBlank() && !"FILE".equals(f.getType())) {
+                // skip lang for folders
+            } else if (f.getLanguage() != null && !f.getLanguage().isBlank()) {
+                sb.append(" [").append(f.getLanguage()).append("]");
+            }
+            sb.append("\n");
+        }
+        if (tree.size() > 80) {
+            sb.append("... and ").append(tree.size() - 80).append(" more files\n");
+        }
+        return sb.toString();
+    }
+
+    private String buildAdditionalFilesSection(AiRequestDto dto) {
+        List<AiRequestDto.AdditionalFileContext> files = dto.getAdditionalFiles();
+        if (files == null || files.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder("### Referenced Files\n");
+        for (AiRequestDto.AdditionalFileContext f : files) {
+            String content = f.getContent() != null ? f.getContent() : "";
+            if (content.length() > 2000) {
+                content = content.substring(0, 2000) + "\n...(truncated)";
+            }
+            sb.append("\n#### ").append(f.getName()).append("\n");
+            sb.append("```").append(f.getLanguage() != null ? f.getLanguage() : "").append("\n");
+            sb.append(content).append("\n```\n");
+        }
+        return sb.toString();
     }
 
     public String optimizeCode(String code, String language) {

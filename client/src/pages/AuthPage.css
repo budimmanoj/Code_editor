@@ -1,7 +1,202 @@
 .auth-bg {
-  height: 100%; display: flex; align-items: center; justify-content: center;
-  position: relative; overflow: hidden; background: var(--bg0);
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  background: var(--bg0);
   animation: fadeIn .4s ease;
+}
+
+.auth-watermark {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  display: flex;
+  gap: 460px; /* 👈 space between CODE and ROOM */
+
+  font-family: var(--font-mono);
+  font-size: 10vw;
+  font-weight: 900;
+  opacity: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  letter-spacing: -0.05em;
+}
+
+.auth-hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+/* Scroll Down Indicator */
+.scroll-indicator {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 2rem;
+  color: var(--text1);
+  animation: bounce 2s infinite;
+  cursor: pointer;
+}
+.scroll-indicator span {
+  display: inline-block;
+}
+@keyframes bounce {
+  0%,20%,50%,80%,100% { transform: translateX(-50%) translateY(0); }
+  40% { transform: translateX(-50%) translateY(-8px); }
+  60% { transform: translateX(-50%) translateY(-4px); }
+}
+
+
+/* Landing Page Features */
+.landing-features {
+  padding: 80px 24px;
+  background: var(--bg1);
+  position: relative;
+  z-index: 1;
+  border-top: 1px solid var(--line);
+}
+
+.features-container {
+  max-width: 1024px;
+  margin: 0 auto;
+}
+
+.features-header {
+  text-align: center;
+  margin-bottom: 64px;
+}
+.features-header h2 {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--text0);
+  margin-bottom: 16px;
+  letter-spacing: -0.02em;
+}
+.features-header p {
+  font-size: 16px;
+  color: var(--text1);
+  max-width: 600px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 32px;
+}
+
+.feature-card {
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  padding: 32px;
+  border-radius: var(--r-lg);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0,0,0,0.05);
+  border-color: var(--accent);
+}
+
+.feature-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.feature-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text0);
+  margin-bottom: 12px;
+}
+.feature-card p {
+  font-size: 14px;
+  color: var(--text1);
+  line-height: 1.6;
+}
+
+/* Landing Footer */
+.landing-footer {
+  background: var(--bg0);
+  padding: 48px 24px;
+  border-top: 1px solid var(--line);
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+
+.footer-content {
+  max-width: 1024px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.footer-logo {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 16px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text0);
+}
+
+.footer-text {
+  font-size: 14px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+.footer-contact {
+  font-size: 14px;
+  color: var(--text1);
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.footer-contact a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.footer-contact a:hover {
+  text-decoration: underline;
+}
+
+.auth-description {
+  position: absolute;
+  top: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  font-size: 16px;
+  color: var(--text1);
+  line-height: 1.6;
+  opacity: 0.6;
+  font-family: var(--font-ui);
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  z-index: 0;
+  max-width: 600px;
 }
 
 .auth-noise {
@@ -75,4 +270,21 @@
 .auth-footer {
   margin-top: 20px; text-align: center;
   font-size: 11px; font-family: var(--font-mono); color: var(--text2);
+}
+
+.forgot-link {
+  width: 50%;
+  padding: 6px;
+  margin-top: 2px;
+  border-radius: var(--r);
+  font-size: 12px;
+  letter-spacing: .02em;
+  border: 1px solid var(--line);
+  color: #5C9E19;
+  cursor: pointer;
+  transition: all .2s;
+}
+.forgot-link:hover {
+  background: #5C9E19;
+  color: var(--text0);
 }

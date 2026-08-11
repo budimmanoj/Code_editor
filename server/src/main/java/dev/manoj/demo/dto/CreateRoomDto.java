@@ -1,7 +1,9 @@
 package dev.manoj.demo.dto;
 
 import java.util.UUID;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateRoomDto {
 
     private String name; // room name 

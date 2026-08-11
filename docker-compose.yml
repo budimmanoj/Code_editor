@@ -39,6 +39,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
       PORT: 8080
     ports:
       - "8080:8080"

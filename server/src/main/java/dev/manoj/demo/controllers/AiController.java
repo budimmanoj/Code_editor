@@ -1,6 +1,9 @@
 package dev.manoj.demo.controllers;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.manoj.demo.ai.AiService;
+import dev.manoj.demo.dto.AiActionDto;
 import dev.manoj.demo.dto.AiRequestDto;
 import dev.manoj.demo.dto.AiResponseDto;
 import dev.manoj.demo.service.WorkSpaceService;
@@ -26,7 +29,7 @@ import java.util.UUID;
  *   POST /api/ai/security         — security scan
  *   POST /api/ai/optimize         — optimize for performance
  *   POST /api/ai/docs             — generate documentation
- *   POST /api/ai/chat             — chat with code context
+ *   POST /api/ai/chat             — workspace-aware chat (structured JSON response)
  *   POST /api/ai/review-before-commit — comprehensive pre-commit review
  */
 @RestController
@@ -35,6 +38,7 @@ public class AiController {
 
     private final AiService aiService;
     private final WorkSpaceService workSpaceService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AiController(AiService aiService, WorkSpaceService workSpaceService) {
         this.aiService = aiService;
@@ -103,11 +107,32 @@ public class AiController {
         return ok(aiService.generateDocs(code, lang(dto)));
     }
 
+    /**
+     * Workspace-aware chat endpoint.
+     *
+     * Accepts the extended AiRequestDto with optional:
+     *   - code (live editor content for active file)
+     *   - workspaceTree (compact file tree)
+     *   - activeFileName, additionalFiles
+     *
+     * The AI returns structured JSON. This endpoint parses it and returns:
+     *   - AiResponseDto with responseType="TEXT" for plain answers
+     *   - AiResponseDto with responseType="ACTION" + action payload for file operations
+     */
     @PostMapping("/chat")
     public ResponseEntity<AiResponseDto> chat(@RequestBody AiRequestDto dto, Authentication auth) {
-        String codeContext = resolveCode(dto, auth);
+        // Ensure inline code is resolved (if not already set via live editor)
+        if ((dto.getCode() == null || dto.getCode().isBlank()) && auth != null) {
+            String resolved = resolveCode(dto, auth);
+            dto.setCode(resolved);
+        }
         String message = dto.getMessage() != null ? dto.getMessage() : "";
-        return ok(aiService.chat(message, codeContext, lang(dto)));
+
+        // Use workspace-aware chat for rich context
+        String rawResponse = aiService.workspaceChat(dto);
+
+        // Parse structured JSON response from AI
+        return ResponseEntity.ok(parseAiResponse(rawResponse));
     }
 
     @PostMapping("/review-before-commit")
@@ -142,5 +167,49 @@ public class AiController {
             }
         }
         return dto.getCode() != null ? dto.getCode() : "";
+    }
+
+    /**
+     * Parse the structured JSON response from the workspace-aware AI.
+     * Handles cases where the AI wraps JSON in markdown code blocks.
+     *
+     * Expected formats:
+     *   {"type":"TEXT","result":"..."}
+     *   {"type":"ACTION","action":{...}}
+     */
+    private AiResponseDto parseAiResponse(String rawResponse) {
+        if (rawResponse == null || rawResponse.isBlank()) {
+            return new AiResponseDto("No response from AI.", "gemini");
+        }
+
+        // Strip markdown code block wrappers if the AI added them
+        String json = rawResponse.trim();
+        if (json.startsWith("```json")) {
+            json = json.substring(7);
+            if (json.endsWith("```")) json = json.substring(0, json.length() - 3);
+            json = json.trim();
+        } else if (json.startsWith("```")) {
+            json = json.substring(3);
+            if (json.endsWith("```")) json = json.substring(0, json.length() - 3);
+            json = json.trim();
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(json);
+            String type = root.path("type").asText("TEXT");
+
+            if ("ACTION".equals(type)) {
+                JsonNode actionNode = root.path("action");
+                AiActionDto action = objectMapper.treeToValue(actionNode, AiActionDto.class);
+                return new AiResponseDto(action, "gemini");
+            } else {
+                // TEXT response
+                String result = root.path("result").asText(rawResponse);
+                return new AiResponseDto(result, "gemini");
+            }
+        } catch (Exception e) {
+            // AI returned non-JSON — treat as plain text (fallback for non-workspace modes)
+            return new AiResponseDto(rawResponse, "gemini");
+        }
     }
 }

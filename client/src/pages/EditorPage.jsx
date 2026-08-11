@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Download, Save, LogOut, Code2, Upload, FolderUp, FileCode, Bot, History, Users, Search, Play, RefreshCw, Archive, CheckCircle2, XCircle } from 'lucide-react';
+import { Download, Save, LogOut, Code2, Upload, FolderUp, FileCode, Bot, History, Users, RefreshCw, Archive, CheckCircle2, XCircle } from 'lucide-react';
+import ReactDiffViewer from 'react-diff-viewer-continued';
 import { api, tokenStore } from '../api/client';
 import { RoomSocket } from '../websocket/RoomSocket';
+import { CodeRoomYjsProvider } from '../utils/yjsProvider';
 import FileTree from '../components/FileTree';
 import CodeEditor from '../components/CodeEditor';
 import Participants from '../components/Participants';
@@ -29,12 +31,12 @@ function langFromExt(filename) {
 function isBinaryFile(filename) {
   const ext = (filename.split('.').pop() || '').toLowerCase();
   const BINARY = new Set([
-    'png','jpg','jpeg','gif','webp','ico','svg','bmp','tiff',
-    'pdf','doc','docx','xls','xlsx','ppt','pptx',
-    'zip','tar','gz','rar','7z','bz2',
-    'exe','dll','so','dylib','bin','class','jar','war',
-    'mp3','mp4','mov','avi','mkv','wav','flac',
-    'ttf','otf','woff','woff2','eot','db','sqlite','lock',
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'svg', 'bmp', 'tiff',
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+    'zip', 'tar', 'gz', 'rar', '7z', 'bz2',
+    'exe', 'dll', 'so', 'dylib', 'bin', 'class', 'jar', 'war',
+    'mp3', 'mp4', 'mov', 'avi', 'mkv', 'wav', 'flac',
+    'ttf', 'otf', 'woff', 'woff2', 'eot', 'db', 'sqlite', 'lock',
   ]);
   return BINARY.has(ext);
 }
@@ -60,67 +62,124 @@ function downloadText(filename, content) {
   URL.revokeObjectURL(url);
 }
 
+// ── Tree utilities ─────────────────────────────────────────────────────────────
+
+/** Recursively flatten a FileTreeDto into {folders, files} arrays with path info for the scope selector */
+function flattenTreeForScope(node, parentPath = '') {
+  if (!node) return { folders: [], files: [] };
+  const result = { folders: [], files: [] };
+  const children = node.children || [];
+
+  // Handle virtual root
+  if (node.id === null && node.name === '__root__') {
+    for (const child of children) {
+      const sub = flattenTreeForScope(child, '');
+      result.folders.push(...sub.folders);
+      result.files.push(...sub.files);
+    }
+    return result;
+  }
+
+  const path = parentPath ? `${parentPath}/${node.name}` : node.name;
+
+  if (node.fileType === 'FOLDER') {
+    result.folders.push({ id: node.id, name: node.name, path });
+    for (const child of children) {
+      const sub = flattenTreeForScope(child, path);
+      result.folders.push(...sub.folders);
+      result.files.push(...sub.files);
+    }
+  } else {
+    result.files.push({ id: node.id, name: node.name, path });
+  }
+
+  return result;
+}
+
+/** Compute simple line diff stats from two content strings */
+function computeDiffStats(oldContent, newContent) {
+  if (!oldContent && !newContent) return { added: 0, removed: 0 };
+  const oldLines = (oldContent || '').split('\n');
+  const newLines = (newContent || '').split('\n');
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  const added = newLines.filter(l => !oldSet.has(l)).length;
+  const removed = oldLines.filter(l => !newSet.has(l)).length;
+  return { added, removed };
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function EditorPage({ user, roomId, roomName, userRole, onLeave }) {
   // Core state
-  const [tree,         setTree]         = useState(null);
+  const [tree, setTree] = useState(null);
   const [participants, setParticipants] = useState([]);
-  const [activeFile,   setActiveFile]   = useState(() => {
+  const [activeFile, setActiveFile] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem(`cr_file_${roomId}`)); } catch { return null; }
   });
-  const [code,         setCode]         = useState(() => {
+  const [code, setCode] = useState(() => {
     try {
       const file = JSON.parse(sessionStorage.getItem(`cr_file_${roomId}`));
       if (file) return sessionStorage.getItem(`cr_code_${roomId}_${file.id}`) || '';
     } catch { /* ignore */ }
     return '';
   });
-  const [savedCode,    setSavedCode]    = useState('');
-  const [saving,       setSaving]       = useState(false);
-  const [saveMsg,      setSaveMsg]      = useState('');
-  const [versions,     setVersions]     = useState([]);
-  const [modal,        setModal]        = useState(null);
-  const [sideTab,      setSideTab]      = useState('files');
-  const [error,        setError]        = useState('');
-  const [inviteCode,   setInviteCode]   = useState('');
+  const [savedCode, setSavedCode] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
+  const [versions, setVersions] = useState([]);
+  const [historyScope, setHistoryScope] = useState({ type: 'CODEBASE', id: roomId, name: 'Codebase' });
+  const [modal, setModal] = useState(null);
+  const [sideTab, setSideTab] = useState('files');
+  const [error, setError] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [aiPanelWidth, setAiPanelWidth] = useState(420);
   const [viewCodeVersion, setViewCodeVersion] = useState(null);
-  const [downloadMsg,  setDownloadMsg]  = useState('');
+  const [historyTab, setHistoryTab] = useState('approvals');
+  const [viewCodeOldContent, setViewCodeOldContent] = useState('');
+  const [downloadMsg, setDownloadMsg] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   // WebSocket / Collaboration state
-  const [wsConnected,  setWsConnected]  = useState(false);
-  const [onlineUsers,  setOnlineUsers]  = useState(new Map()); // userId → {userId, username, color}
-  const [typingUsers,  setTypingUsers]  = useState(new Map()); // userId → {username, color}
-  const [toasts,       setToasts]       = useState([]);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState(new Map()); // userId → {userId, username, color}
+  const [typingUsers, setTypingUsers] = useState(new Map()); // userId → {username, color}
+  const [toasts, setToasts] = useState([]);
+
+  // Yjs Provider State
+  const [yjsProvider, setYjsProvider] = useState(null);
+
+  // Pending review state (admin)
+  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingFileIds, setPendingFileIds] = useState(new Set());
+  const [rejectDialog, setRejectDialog] = useState(null); // { versionId } | null
+  const [rejectComment, setRejectComment] = useState('');
 
   // AI Panel state
-  const [showAiPanel,  setShowAiPanel]  = useState(false);
-  const [reviewResult, setReviewResult] = useState('');
-  const [reviewLoading,setReviewLoading]= useState(false);
-  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showAiPanel, setShowAiPanel] = useState(false);
 
   // Upload drag-drop state
-  const [isDragOver,   setIsDragOver]   = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // { done, total, label }
 
   // Refs
-  const socketRef        = useRef(null);
-  const activeFileRef    = useRef(activeFile);
-  const lastRemoteCode   = useRef('');    // track last content received via WS
-  const wsUpdateTimer    = useRef(null);  // debounced WS send timer
-  const typingTimer      = useRef(null);  // typing indicator timer
-  const isResizing       = useRef(false);
-  const fileInputRef     = useRef(null);
-  const folderInputRef   = useRef(null);
+  const socketRef = useRef(null);
+  const activeFileRef = useRef(activeFile);
+  const reviewAndSaveRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
+  const historyRequestRef = useRef(0);
 
   const isAdmin = userRole === 'ADMIN';
   const isDirty = code !== savedCode;
 
-  // Keep activeFileRef in sync
+  const onlineUsersRef = useRef(onlineUsers);
+
   useEffect(() => { activeFileRef.current = activeFile; }, [activeFile]);
+  useEffect(() => { onlineUsersRef.current = onlineUsers; }, [onlineUsers]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { reviewAndSaveRef.current = reviewAndSave; }, [reviewAndSave]);
 
   // ── Drag to Resize (Pointer Capture + RAF for smooth 60fps) ─────────────────
 
@@ -190,7 +249,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     const socket = new RoomSocket(roomId, tokenStore.get());
     socketRef.current = socket;
 
-    socket.on('connected',    () => setWsConnected(true));
+    socket.on('connected', () => setWsConnected(true));
     socket.on('disconnected', () => setWsConnected(false));
 
     socket.on('PRESENCE_INIT', (msg) => {
@@ -209,14 +268,55 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       addToast(`${msg.username} left`, 'leave');
     });
 
-    socket.on('CODE_UPDATE', (msg) => {
-      // Only update if this message is for the currently open file
-      if (!activeFileRef.current || activeFileRef.current.id !== msg.fileId) return;
-      // Ignore echoes of our own edits (server doesn't echo, but extra safety)
-      if (msg.userId === String(user.id)) return;
-      // Track remote content to avoid echo loop
-      lastRemoteCode.current = msg.content;
-      setCode(msg.content);
+    socket.on('YJS_UPDATE', (msg) => {
+      setYjsProvider(prev => {
+        if (prev && prev.fileId === msg.fileId) {
+          prev.handleUpdate(msg.update);
+        }
+        return prev;
+      });
+    });
+
+    socket.on('YJS_AWARENESS', (msg) => {
+      setYjsProvider(prev => {
+        if (prev && prev.fileId === msg.fileId) {
+          prev.handleAwareness(msg.update);
+        }
+        return prev;
+      });
+    });
+
+    socket.on('YJS_STATE_RESPONSE', (msg) => {
+      setYjsProvider(prev => {
+        if (prev && prev.fileId === msg.fileId) {
+          prev.handleStateResponse(msg.updates);
+        }
+        return prev;
+      });
+    });
+
+    // CODE_UPDATE is deprecated in favor of Yjs sync
+
+    // Admin approved a version — do NOT overwrite the collaborative editor content!
+    socket.on('REVISION_APPROVED', (msg) => {
+      if (activeFileRef.current && activeFileRef.current.id === msg.fileId) {
+        addToast(`✅ ${msg.approvedBy} approved this file`, 'info');
+      }
+      // Refresh version list if history tab is open
+      setVersions(prev => prev.map(v =>
+        v.id === msg.versionId ? { ...v, status: 'REVIEWED', reviewedBy: msg.approvedBy } : v
+      ));
+      // Decrement pending badge
+      setPendingCount(c => Math.max(0, c - 1));
+    });
+
+    // Admin rejected a version
+    socket.on('REVISION_REJECTED', (msg) => {
+      setVersions(prev => prev.map(v =>
+        v.id === msg.versionId ? { ...v, status: 'REJECTED' } : v
+      ));
+      setPendingCount(c => Math.max(0, c - 1));
+      addToast(`❌ A version was rejected: ${msg.reason || 'no comment'}`, 'leave');
     });
 
     socket.on('TYPING', (msg) => {
@@ -247,10 +347,52 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     } catch { /* ignore */ }
   }, [roomId]);
 
-  const loadVersions = useCallback(async (fileId) => {
-    try { setVersions(await api.getFileVersions(roomId, fileId)); }
-    catch { setVersions([]); }
+  const loadPendingFiles = useCallback(async () => {
+    try {
+      const pending = await api.getPendingVersions(roomId);
+      setPendingCount(pending.length);
+      setPendingFileIds(new Set(pending.map(v => v.fileNodeId)));
+    } catch { /* ignore */ }
   }, [roomId]);
+
+  // Sync viewCodeOldContent when viewing a diff
+  useEffect(() => {
+    if (viewCodeVersion && viewCodeVersion.fileNodeId) {
+      if (viewCodeVersion.status === 'PENDING') {
+        // Pending approval: Compare against CURRENT canonical file code
+        api.getFile(roomId, viewCodeVersion.fileNodeId)
+          .then(content => setViewCodeOldContent(content))
+          .catch(() => setViewCodeOldContent('// Error loading original code'));
+      } else {
+        // Historical version: Compare against chronologically previous version
+        const idx = versions.findIndex(v => v.id === viewCodeVersion.id);
+        if (idx !== -1 && idx + 1 < versions.length) {
+          setViewCodeOldContent(versions[idx + 1].content);
+        } else {
+          setViewCodeOldContent('');
+        }
+      }
+    }
+  }, [viewCodeVersion, versions, roomId]);
+
+  const loadVersions = useCallback(async (scope) => {
+    if (!scope || !roomId) return;
+    const reqId = ++historyRequestRef.current;
+
+    try {
+      const data = await api.getHistory(roomId, scope.type, scope.id);
+      if (historyRequestRef.current !== reqId) return; // stale response
+      setVersions(data);
+    } catch (err) {
+      console.error('Failed to load history', err);
+    }
+  }, [roomId]);
+
+  useEffect(() => {
+    if (sideTab === 'history') {
+      loadVersions(historyScope);
+    }
+  }, [sideTab, historyScope, loadVersions]);
 
   // Admin invite code
   useEffect(() => {
@@ -258,7 +400,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       api.getMyProfile().then(profile => {
         const r = (profile.roomsCreated || []).find(r => r.id === roomId);
         if (r) setInviteCode(r.inviteCode);
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, [isAdmin, roomId]);
 
@@ -266,122 +408,110 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   useEffect(() => {
     loadTree();
     loadParticipants();
-    if (activeFile) {
-      loadVersions(activeFile.id);
-      api.getFile(roomId, activeFile.id).then(content => {
-        setSavedCode(content || '');
-        const draft = sessionStorage.getItem(`cr_code_${roomId}_${activeFile.id}`);
-        if (!draft || draft === content) { setCode(content || ''); setSaveMsg(''); }
-      }).catch(() => {});
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadPendingFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Provider creation on file switch or reload
+  useEffect(() => {
+    if (!activeFile || !roomId) {
+      setYjsProvider(prev => { if (prev) prev.destroy(); return null; });
+      return;
+    }
+
+    let isMounted = true;
+    api.getFile(roomId, activeFile.id).then(data => {
+      if (!isMounted) return;
+      const content = typeof data === 'string' ? data : (data?.content || '');
+      setSavedCode(content);
+
+      const draft = sessionStorage.getItem(`cr_code_${roomId}_${activeFile.id}`);
+      const initialContent = (!draft || draft === content) ? content : draft;
+      setCode(initialContent);
+      if (!draft || draft === content) setSaveMsg('');
+
+      // Initialize Yjs Provider
+      setYjsProvider(prev => {
+        if (prev) prev.destroy();
+        const myColor = onlineUsersRef.current.get(user.id)?.color || '#58a6ff';
+        const wsSendFn = (msg) => socketRef.current?.send(msg);
+        return new CodeRoomYjsProvider(wsSendFn, roomId, activeFile.id, user.username || user.email, myColor, initialContent);
+      });
+
+      loadVersions(historyScope);
+    }).catch(err => {
+      if (isMounted) setError('Could not load file: ' + err.message);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFile?.id, roomId, user.username, user.email]);
 
   // Session persistence
   useEffect(() => {
     if (activeFile) sessionStorage.setItem(`cr_file_${roomId}`, JSON.stringify(activeFile));
-    else            sessionStorage.removeItem(`cr_file_${roomId}`);
+    else sessionStorage.removeItem(`cr_file_${roomId}`);
   }, [activeFile, roomId]);
 
   useEffect(() => {
     if (code && activeFile) sessionStorage.setItem(`cr_code_${roomId}_${activeFile.id}`, code);
-    else if (activeFile)    sessionStorage.removeItem(`cr_code_${roomId}_${activeFile.id}`);
+    else if (activeFile) sessionStorage.removeItem(`cr_code_${roomId}_${activeFile.id}`);
   }, [code, roomId, activeFile]);
 
   // ── File selection ─────────────────────────────────────────────────────────
 
   async function selectFile(node) {
-    if (node.fileType === 'FOLDER') return;
-    const draft = sessionStorage.getItem(`cr_code_${roomId}_${node.id}`);
+    if (node.id === null && node.name === '__root__') {
+      setHistoryScope({ type: 'CODEBASE', id: roomId, name: 'Codebase' });
+      return;
+    }
+    if (node.fileType === 'FOLDER') {
+      setHistoryScope({ type: 'FOLDER', id: node.id, name: node.name + '/' });
+      return;
+    }
     setActiveFile(node);
-    lastRemoteCode.current = '';
-    if (draft) { setCode(draft); setSaveMsg('unsaved'); }
-    else       { setCode(''); setSaveMsg(''); }
-    try {
-      const content = await api.getFile(roomId, node.id);
-      if (draft && draft !== content) { setCode(draft); setSaveMsg('unsaved'); }
-      else { setCode(content || ''); }
-      setSavedCode(content || '');
-      lastRemoteCode.current = content || '';
-      loadVersions(node.id);
-    } catch { setCode(''); setSavedCode(''); }
+    setHistoryScope({ type: 'FILE', id: node.id, name: node.name });
+    // Content loading and provider creation is now handled by the activeFile?.id useEffect
   }
 
   // ── Code editing & saving ──────────────────────────────────────────────────
 
-  const handleCodeChange = useCallback((val) => {
-    setCode(val);
-    if (!activeFileRef.current) return;
-    setSaveMsg('unsaved');
+  function handleCodeChange(newVal) {
+    // This is only used as a fallback if ytext isn't passed, but we still update local state
+    setCode(newVal);
+  }
 
-    // Don't echo remote updates back over WS
-    if (val === lastRemoteCode.current) return;
+  // ── Explicit Save (Submit for Review) ─────────────────────────────────────
 
-    // Debounced WS broadcast (500ms)
-    if (wsUpdateTimer.current) clearTimeout(wsUpdateTimer.current);
-    wsUpdateTimer.current = setTimeout(() => {
-      socketRef.current?.sendCodeUpdate(activeFileRef.current?.id, val);
-    }, 500);
-
-    // Typing indicator
-    socketRef.current?.sendTyping(activeFileRef.current?.id, true);
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => {
-      socketRef.current?.sendTyping(activeFileRef.current?.id, false);
-    }, 2000);
-  }, []);
-
-  // saveCode — stable ref so autosave effect doesn't recreate on every keystroke
-  const saveCodeRef = useRef(null);
-  const saveCode = useCallback(async () => {
-    const file = activeFileRef.current;
-    if (!file) return;
-    setSaving(true);
-    setSaveMsg('saving');
-    // Read code from ref-stable closure via functional updater
-    setCode(currentCode => {
-      (async () => {
-        try {
-          await api.updateCode({ roomId, fileNodeId: file.id, content: currentCode });
-          setSavedCode(currentCode);
-          setSaveMsg('saved');
-          setTimeout(() => setSaveMsg(''), 2000);
-          loadVersions(file.id);
-        } catch (e) { setSaveMsg('error'); setError('Save failed: ' + e.message); }
-        finally { setSaving(false); }
-      })();
-      return currentCode; // no actual state change
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
-  saveCodeRef.current = saveCode;
-
-  // Autosave: 3s after last keystroke — reduced from 1.5s to avoid hammering
-  // the DB while actively typing, especially in rooms with live collaboration.
-  useEffect(() => {
-    if (activeFile && code !== savedCode) {
-      const timer = setTimeout(() => saveCodeRef.current?.(), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [code, activeFile, savedCode]);
-
-  // AI Review before saving — opens modal with review, then saves
   async function reviewAndSave() {
     if (!activeFile) return;
-    setShowReviewModal(true);
-    setReviewLoading(true);
-    setReviewResult('');
+    setSaving(true);
+    setSaveMsg('submitting...');
     try {
-      const resp = await api.aiCall('review-before-commit', {
-        code, language: activeFile.language,
-        filename: activeFile.name,
-        roomId, fileNodeId: activeFile.id,
+      // Get the latest text directly from the Yjs document if available
+      const textToSave = yjsProvider ? yjsProvider.ytext.toString() : code;
+
+      const data = await api.updateCode({
+        roomId,
+        fileNodeId: activeFile.id,
+        content: textToSave
       });
-      setReviewResult(resp.result);
-    } catch (e) {
-      setReviewResult('⚠️ AI review unavailable: ' + e.message + '\n\nYou can still save normally.');
+      setSavedCode(textToSave);
+      setSaveMsg(typeof data === 'string' ? data : 'Saved'); // e.g. "Code submitted for review"
+      addToast('Change submitted successfully', 'info');
+      loadPendingFiles();
+      if (sideTab === 'history') {
+        loadVersions(historyScope);
+      }
+    } catch (err) {
+      setSaveMsg('error');
+      addToast('Failed to save: ' + (err.message || 'unknown error'), 'error');
+      console.error('[Save] Error:', err);
     } finally {
-      setReviewLoading(false);
+      setTimeout(() => setSaveMsg(''), 3000);
+      setSaving(false);
     }
   }
 
@@ -391,23 +521,46 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     if (!activeFile) return;
     try {
       const newCode = await api.revertToVersion(roomId, activeFile.id, versionId);
-      setCode(newCode); setSavedCode(newCode); setSaveMsg('saved');
-      lastRemoteCode.current = newCode;
-      socketRef.current?.sendCodeUpdate(activeFile.id, newCode);
+      if (yjsProvider) {
+        yjsProvider.doc.transact(() => {
+          yjsProvider.ytext.delete(0, yjsProvider.ytext.length);
+          yjsProvider.ytext.insert(0, newCode);
+        });
+      } else {
+        setCode(newCode);
+      }
+      setSavedCode(newCode);
+      setSaveMsg('saved');
       setTimeout(() => setSaveMsg(''), 2000);
-      loadVersions(activeFile.id);
+      loadVersions(historyScope);
     } catch (e) { setError('Failed to revert: ' + e.message); }
   }
 
-  async function reviewVersion(versionId, status) {
+  async function approveVersion(versionId) {
     try {
-      await api.updateVersionStatus(roomId, versionId, status);
-      loadVersions(activeFile.id);
-      const content = await api.getFile(roomId, activeFile.id);
-      setCode(content || ''); setSavedCode(content || '');
-      lastRemoteCode.current = content || '';
-    } catch (e) { setError('Failed to update status: ' + e.message); }
+      await api.approveVersion(roomId, versionId);
+      loadVersions(historyScope);
+      loadPendingFiles();
+      addToast('✅ Version approved!', 'info');
+    } catch (e) { setError('Failed to approve: ' + e.message); }
   }
+
+  async function rejectVersion(versionId, comment) {
+    try {
+      await api.rejectVersion(roomId, versionId, comment || '');
+      loadVersions(historyScope);
+      loadPendingFiles();
+      setRejectDialog(null); setRejectComment('');
+      addToast('❌ Version rejected', 'leave');
+    } catch (e) { setError('Failed to reject: ' + e.message); }
+  }
+
+  // Refresh pending count whenever versions load (admin only)
+  useEffect(() => {
+    if (isAdmin && versions.length > 0) {
+      setPendingCount(versions.filter(v => v.status === 'PENDING').length);
+    }
+  }, [versions, isAdmin]);
 
   // ── Create / Delete / Rename ───────────────────────────────────────────────
 
@@ -448,7 +601,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const textFiles = files.filter(f => !isBinaryFile(f.name));
-    const skipped   = files.filter(f =>  isBinaryFile(f.name)).map(f => f.name);
+    const skipped = files.filter(f => isBinaryFile(f.name)).map(f => f.name);
     if (!textFiles.length) { setError(`Skipped binary files: ${skipped.join(', ')}`); return; }
 
     setSaving(true); setError('');
@@ -458,9 +611,9 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       // Read all files in parallel (reading is cheap — no server calls yet)
       const prepared = await Promise.all(
         textFiles.map(async (file) => ({
-          name:     file.name,
+          name: file.name,
           language: langFromExt(file.name),
-          content:  sanitizeText(await file.text()),
+          content: sanitizeText(await file.text()),
         }))
       );
 
@@ -490,7 +643,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const textFiles = files.filter(f => !isBinaryFile(f.name));
-    const skipped   = files.filter(f =>  isBinaryFile(f.name)).map(f => f.webkitRelativePath);
+    const skipped = files.filter(f => isBinaryFile(f.name)).map(f => f.webkitRelativePath);
 
     setSaving(true); setError('');
     setUploadProgress({ done: 0, total: textFiles.length, label: 'Building folder structure…' });
@@ -511,10 +664,10 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       const sortedDirs = [...allDirPaths].sort((a, b) => a.split('/').length - b.split('/').length);
       for (const dirPath of sortedDirs) {
         if (dirPath in dirMap) continue;
-        const parts     = dirPath.split('/');
-        const dirName   = parts[parts.length - 1];
+        const parts = dirPath.split('/');
+        const dirName = parts[parts.length - 1];
         const parentKey = parts.slice(0, -1).join('/');
-        const created   = await api.createFileNode({ roomId, parentId: dirMap[parentKey] ?? null, name: dirName, type: 'FOLDER' });
+        const created = await api.createFileNode({ roomId, parentId: dirMap[parentKey] ?? null, name: dirName, type: 'FOLDER' });
         dirMap[dirPath] = created.id;
       }
 
@@ -523,14 +676,14 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       // ── Step 2: Read all file contents in parallel ──
       const prepared = await Promise.all(
         textFiles.map(async (file) => {
-          const parts     = file.webkitRelativePath.split('/');
-          const fileName  = parts[parts.length - 1];
+          const parts = file.webkitRelativePath.split('/');
+          const fileName = parts[parts.length - 1];
           const parentKey = parts.slice(0, -1).join('/');
           return {
-            name:     fileName,
+            name: fileName,
             language: langFromExt(fileName),
             parentId: dirMap[parentKey] ?? null,
-            content:  sanitizeText(await file.text()),
+            content: sanitizeText(await file.text()),
           };
         })
       );
@@ -610,7 +763,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   async function uploadFromFileList(fileList) {
     const textFiles = fileList.filter(({ file }) => !isBinaryFile(file.name));
-    const skipped   = fileList.filter(({ file }) =>  isBinaryFile(file.name)).map(({ relativePath }) => relativePath);
+    const skipped = fileList.filter(({ file }) => isBinaryFile(file.name)).map(({ relativePath }) => relativePath);
     if (!textFiles.length) { setError(`Skipped binary files: ${skipped.join(', ')}`); return; }
 
     setSaving(true); setError('');
@@ -630,17 +783,17 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       const sortedDirs = [...allDirPaths].sort((a, b) => a.split('/').length - b.split('/').length);
       for (const dirPath of sortedDirs) {
         if (dirPath in dirMap) continue;
-        const parts     = dirPath.split('/');
-        const dirName   = parts[parts.length - 1];
+        const parts = dirPath.split('/');
+        const dirName = parts[parts.length - 1];
         const parentKey = parts.slice(0, -1).join('/');
-        const created   = await api.createFileNode({ roomId, parentId: dirMap[parentKey] ?? null, name: dirName, type: 'FOLDER' });
+        const created = await api.createFileNode({ roomId, parentId: dirMap[parentKey] ?? null, name: dirName, type: 'FOLDER' });
         dirMap[dirPath] = created.id;
       }
       setUploadProgress({ done: 0, total: textFiles.length, label: 'Uploading files…' });
       const prepared = await Promise.all(
         textFiles.map(async ({ file, relativePath }) => {
-          const parts     = relativePath.split('/');
-          const fileName  = parts[parts.length - 1];
+          const parts = relativePath.split('/');
+          const fileName = parts[parts.length - 1];
           const parentKey = parts.slice(0, -1).join('/');
           return { name: fileName, language: langFromExt(fileName), parentId: dirMap[parentKey] ?? null, content: sanitizeText(await file.text()) };
         })
@@ -708,22 +861,27 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   function handleInsertAiCode(newCode) {
     if (!activeFile) return;
-    lastRemoteCode.current = '';
-    setCode(newCode);
+    if (yjsProvider) {
+      yjsProvider.doc.transact(() => {
+        yjsProvider.ytext.delete(0, yjsProvider.ytext.length);
+        yjsProvider.ytext.insert(0, newCode);
+      });
+    } else {
+      setCode(newCode);
+    }
     setSaveMsg('unsaved');
-    socketRef.current?.sendCodeUpdate(activeFile.id, newCode);
   }
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
 
   useEffect(() => {
     function onKey(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCodeRef.current?.(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); reviewAndSaveRef.current?.(); }
       if ((e.ctrlKey || e.metaKey) && e.key === '`') { e.preventDefault(); setShowAiPanel(p => !p); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // saveCodeRef is a stable ref — no deps needed, avoids re-registering on every keystroke
+    // reviewAndSaveRef is a stable ref
   }, []);
 
   // ── Typing indicator text ──────────────────────────────────────────────────
@@ -775,7 +933,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
       {viewCodeVersion && (
         <div className="view-code-overlay" onClick={() => setViewCodeVersion(null)}>
-          <div className="view-code-modal" onClick={e => e.stopPropagation()}>
+          <div className="view-code-modal" onClick={e => e.stopPropagation()} style={{ width: '90%', maxWidth: '1200px', height: '90%' }}>
             <div className="view-code-header">
               <span>Code Version by {viewCodeVersion.username}</span>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -784,34 +942,20 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                 <button className="btn-icon" onClick={() => setViewCodeVersion(null)}>✕</button>
               </div>
             </div>
-            <div className="view-code-body"><pre>{viewCodeVersion.content}</pre></div>
+            <div className="view-code-body" style={{ overflow: 'auto', background: '#fff' }}>
+              <ReactDiffViewer
+                oldValue={viewCodeOldContent}
+                newValue={viewCodeVersion.content}
+                splitView={true}
+                useDarkTheme={false}
+                leftTitle={viewCodeVersion.status === 'PENDING' ? 'Current Approved' : 'Previous Version'}
+                rightTitle={viewCodeVersion.status === 'PENDING' ? 'Proposed Changes' : `Version ${viewCodeVersion.id.substring(0, 8)}`}
+              />
+            </div>
           </div>
         </div>
       )}
 
-      {/* AI Review before save modal */}
-      {showReviewModal && (
-        <div className="overlay" onClick={() => setShowReviewModal(false)}>
-          <div className="review-modal" onClick={e => e.stopPropagation()}>
-            <div className="review-modal-header">
-              <span>🔍 AI Review — {activeFile?.name}</span>
-              <button className="btn-icon" onClick={() => setShowReviewModal(false)}>✕</button>
-            </div>
-            <div className="review-modal-body">
-              {reviewLoading
-                ? <div className="review-loading"><span className="ai-spinner-lg" /> Analyzing code...</div>
-                : <pre className="review-result">{reviewResult}</pre>
-              }
-            </div>
-            <div className="review-modal-footer">
-              <button className="btn-cancel" onClick={() => setShowReviewModal(false)}>Cancel</button>
-              <button className="run-btn" onClick={() => { setShowReviewModal(false); saveCode(); }}>
-                💾 Save Anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Topbar ──────────────────────────────────────────────────────── */}
       <header className="topbar">
@@ -827,11 +971,10 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
           </div>
 
           <span style={{
-            marginLeft: 8, fontSize: 10, fontWeight: 600, letterSpacing: 1,
-            padding: '2px 8px', borderRadius: 4,
-            background: isAdmin ? '#7c3aed22' : '#0891b222',
-            color: isAdmin ? '#a78bfa' : '#38bdf8',
-            textTransform: 'uppercase'
+            fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+            background: `${onlineUsers.get(user.id)?.color || '#58a6ff'}22`,
+            color: onlineUsers.get(user.id)?.color || '#58a6ff',
+            textTransform: 'uppercase', border: `1px solid ${onlineUsers.get(user.id)?.color || '#58a6ff'}`
           }}>{userRole}</span>
 
           <span className={`ws-dot ${wsConnected ? 'ws-dot--on' : 'ws-dot--off'}`}
@@ -863,9 +1006,9 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
         <div className="topbar-right">
           {downloadMsg && <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{downloadMsg}</span>}
           {saveMsg === 'unsaved' && <span className="save-badge unsaved">● unsaved</span>}
-          {saveMsg === 'saving'  && <span className="save-badge saved">● saving...</span>}
-          {saveMsg === 'saved'   && <span className="save-badge saved">✓ saved</span>}
-          {saveMsg === 'error'   && <span className="save-badge error-badge">✗ save failed</span>}
+          {saveMsg === 'saving' && <span className="save-badge saved">● saving...</span>}
+          {saveMsg === 'saved' && <span className="save-badge saved">✓ saved</span>}
+          {saveMsg === 'error' && <span className="save-badge error-badge">✗ save failed</span>}
 
           <button className={`topbar-btn ${showAiPanel ? 'active' : ''}`}
             onClick={() => setShowAiPanel(p => !p)} title="AI Assistant (Ctrl+`)">
@@ -876,7 +1019,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
             <Archive size={18} />
           </button>
 
-          <button className="topbar-btn" onClick={saveCode} disabled={!activeFile || saving} title="Save (Ctrl+S)">
+          <button className="topbar-btn" onClick={reviewAndSave} disabled={!activeFile || saving} title="Save (Ctrl+S)">
             <Save size={18} />
           </button>
 
@@ -890,12 +1033,23 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       <div className="editor-body" style={{ gridTemplateColumns: `${sidebarWidth}px 4px 1fr ${showAiPanel ? `4px ${aiPanelWidth}px` : ''}` }}>
         <aside className="sidebar">
           <div className="sidebar-tabs">
-            <button className={`sidebar-tab ${sideTab === 'files'   ? 'active' : ''}`}
+            <button className={`sidebar-tab ${sideTab === 'files' ? 'active' : ''}`}
               onClick={() => setSideTab('files')} title="Files"><FileCode size={20} /></button>
             <button className={`sidebar-tab ${sideTab === 'history' ? 'active' : ''}`}
-              onClick={() => { setSideTab('history'); if (activeFile) loadVersions(activeFile.id); }}
-              title="History"><History size={20} /></button>
-            <button className={`sidebar-tab ${sideTab === 'people'  ? 'active' : ''}`}
+              onClick={() => { setSideTab('history'); loadVersions(historyScope); }}
+              title="History" style={{ position: 'relative' }}>
+              <History size={20} />
+              {isAdmin && pendingCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: 2, right: 2,
+                  background: '#f97316', color: '#fff',
+                  borderRadius: '50%', fontSize: 9, width: 14, height: 14,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 700, lineHeight: 1,
+                }}>{pendingCount > 9 ? '9+' : pendingCount}</span>
+              )}
+            </button>
+            <button className={`sidebar-tab ${sideTab === 'people' ? 'active' : ''}`}
               onClick={() => setSideTab('people')} title="Participants"><Users size={20} /></button>
           </div>
 
@@ -920,7 +1074,8 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
               <FileTree
                 tree={tree}
                 selectedId={activeFile?.id}
-                onSelect={selectFile}
+                pendingIds={pendingFileIds}
+                onSelect={(id, name) => { selectFile(id, name); setHistoryScope({ type: 'FILE', id, name }); }}
                 onAddFile={(parentId) => setModal({ type: 'FILE', parentId })}
                 onAddFolder={(parentId) => setModal({ type: 'FOLDER', parentId })}
                 onDelete={requestDelete}
@@ -930,40 +1085,259 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
             {/* History tab */}
             <div className={sideTab === 'history' ? '' : 'hide'} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <div className="sidebar-header">
-                <span className="sidebar-title">History</span>
-                <button className="btn-icon" title="Refresh"
-                  onClick={() => activeFile && loadVersions(activeFile.id)}><RefreshCw size={14} /></button>
+              <div className="sidebar-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '6px', paddingBottom: '0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className="sidebar-title">History</span>
+                  <button className="btn-icon" title="Refresh" onClick={() => loadVersions(historyScope)}>
+                    <RefreshCw size={14} />
+                  </button>
+                </div>
+
+                {/* Scope Selector — real files + folders from tree */}
+                {(() => {
+                  const { folders, files } = flattenTreeForScope(tree);
+                  const scopeVal = historyScope.type === 'CODEBASE' ? '__codebase__'
+                    : `${historyScope.type}:${historyScope.id}`;
+                  return (
+                    <>
+                      <label style={{ fontSize: '10px', color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scope</label>
+                      <select
+                        value={scopeVal}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === '__codebase__') {
+                            setHistoryScope({ type: 'CODEBASE', id: roomId, name: 'Entire Codebase' });
+                          } else if (val.startsWith('FOLDER:')) {
+                            const id = val.replace('FOLDER:', '');
+                            const folder = folders.find(f => f.id === id);
+                            setHistoryScope({ type: 'FOLDER', id, name: folder?.path || 'Folder' });
+                          } else if (val.startsWith('FILE:')) {
+                            const id = val.replace('FILE:', '');
+                            const file = files.find(f => f.id === id);
+                            setHistoryScope({ type: 'FILE', id, name: file?.name || 'File' });
+                          }
+                        }}
+                        style={{
+                          background: 'var(--bg2)', color: 'var(--text0)', border: '1px solid var(--line2)',
+                          borderRadius: '4px', padding: '5px 8px', fontSize: '12px', outline: 'none', width: '100%',
+                        }}
+                      >
+                        <option value="__codebase__">Entire Codebase</option>
+                        {folders.length > 0 && (
+                          <optgroup label="── Folders">
+                            {folders.map(f => (
+                              <option key={f.id} value={`FOLDER:${f.id}`}>{f.path}/</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {files.length > 0 && (
+                          <optgroup label="── Files">
+                            {files.map(f => (
+                              <option key={f.id} value={`FILE:${f.id}`}>{f.path}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    </>
+                  );
+                })()}
+
+                {/* Approvals / Versions tabs */}
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--line1)', marginTop: '4px' }}>
+                  <button
+                    onClick={() => setHistoryTab('approvals')}
+                    style={{
+                      flex: 1, padding: '7px 0', background: 'transparent', border: 'none',
+                      color: historyTab === 'approvals' ? 'var(--text0)' : 'var(--text1)',
+                      borderBottom: historyTab === 'approvals' ? '2px solid var(--primary)' : '2px solid transparent',
+                      fontWeight: historyTab === 'approvals' ? 600 : 400, cursor: 'pointer', fontSize: '12px',
+                    }}
+                  >Approvals</button>
+                  <button
+                    onClick={() => setHistoryTab('versions')}
+                    style={{
+                      flex: 1, padding: '7px 0', background: 'transparent', border: 'none',
+                      color: historyTab === 'versions' ? 'var(--text0)' : 'var(--text1)',
+                      borderBottom: historyTab === 'versions' ? '2px solid var(--primary)' : '2px solid transparent',
+                      fontWeight: historyTab === 'versions' ? 600 : 400, cursor: 'pointer', fontSize: '12px',
+                    }}
+                  >Versions</button>
+                </div>
               </div>
-              {!activeFile
-                ? <div style={{ padding: 12, color: 'var(--text1)', fontSize: 12 }}>Open a file to see its history.</div>
-                : (
-                  <div className="history-list">
-                    {versions.map(v => (
-                      <div key={v.id} className="history-item">
+              <div className="history-list">
+                {(() => {
+                  // Sort newest first (already sorted from backend but ensure)
+                  const sorted = [...versions].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                  const pendingVersions = sorted.filter(v => v.status === 'PENDING');
+
+                  const renderApprovalCard = (v, idx) => {
+                    const vColor = onlineUsers.get(v.userId)?.color || '#6b7280';
+                    return (
+                      <div key={v.id} className="history-item" style={{ borderLeft: `3px solid ${vColor}` }}>
+                        {/* File name — always prominent */}
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text0)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+                          {v.fileName || '—'}
+                        </div>
                         <div className="history-header">
-                          <span className="history-user">{v.username}</span>
-                          <span className={`history-status ${v.status}`}>{v.status.replace('_', ' ')}</span>
+                          <span className="history-user" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: vColor, flexShrink: 0 }} />
+                            {v.username}
+                          </span>
+                          <span className="history-status" style={{
+                            background: '#f97316',
+                            color: '#fff', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700,
+                          }}>⏳ Pending</span>
                         </div>
                         <div className="history-time">{new Date(v.createdAt).toLocaleString()}</div>
-                        {v.reviewedBy && (
-                          <div className="history-reviewer">Reviewed by {v.reviewedBy} on {new Date(v.reviewedAt).toLocaleString()}</div>
-                        )}
-                        <div className="history-actions">
-                          <button className="history-btn revert" onClick={() => setViewCodeVersion(v)}>View</button>
-                          <button className="history-btn revert" onClick={() => revertToVersion(v.id)}>Revert</button>
+                        <div className="history-actions" style={{ marginTop: '8px' }}>
+                          <button className="history-btn revert" onClick={() => setViewCodeVersion(v)}>View Changes</button>
                           {isAdmin && (
                             <>
-                              <button className="history-btn review" title="Mark as Reviewed" onClick={() => reviewVersion(v.id, 'REVIEWED')}><CheckCircle2 size={12} /></button>
-                              <button className="history-btn no-change" title="Mark as No Change" onClick={() => reviewVersion(v.id, 'NO_CHANGE')}><XCircle size={12} /></button>
+                              <button
+                                className="history-btn review"
+                                style={{ background: '#22c55e', color: '#fff' }}
+                                onClick={() => approveVersion(v.id)}
+                              ><CheckCircle2 size={12} /> Approve</button>
+                              <button
+                                className="history-btn no-change"
+                                style={{ background: '#ef4444', color: '#fff' }}
+                                onClick={() => { setRejectDialog({ versionId: v.id }); setRejectComment(''); }}
+                              ><XCircle size={12} /> Reject</button>
                             </>
                           )}
                         </div>
                       </div>
-                    ))}
+                    );
+                  };
+
+                  const renderVersionCard = (v, versionNumber) => {
+                    const vColor = onlineUsers.get(v.userId)?.color || '#6b7280';
+                    // Compute diff stats using adjacent version (next in sorted array = older)
+                    const nextIdx = sorted.indexOf(v) + 1;
+                    const olderVersion = nextIdx < sorted.length ? sorted[nextIdx] : null;
+                    const diffStats = olderVersion
+                      ? computeDiffStats(olderVersion.content, v.content)
+                      : null;
+
+                    return (
+                      <div key={v.id} className="history-item" style={{ borderLeft: `3px solid ${vColor}`, position: 'relative' }}>
+                        {/* Timeline dot */}
+                        <div style={{
+                          position: 'absolute', left: '-8px', top: '16px', width: '12px', height: '12px', borderRadius: '50%',
+                          background: v.status === 'PENDING' ? '#f97316' : v.status === 'REVIEWED' ? '#22c55e' : '#ef4444',
+                          border: '2px solid var(--bg1)', zIndex: 1
+                        }} />
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text0)' }}>Version {versionNumber}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text1)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
+                              {v.fileName || '—'}
+                            </div>
+                          </div>
+                          <span className="history-status" style={{
+                            background:
+                              v.status === 'PENDING' ? '#f97316' :
+                                v.status === 'REVIEWED' ? '#22c55e' : '#ef4444',
+                            color: '#fff', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700, flexShrink: 0,
+                          }}>
+                            {v.status === 'PENDING' ? '⏳ Pending' :
+                              v.status === 'REVIEWED' ? '✅ Approved' : '❌ Rejected'}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: vColor, flexShrink: 0 }} />
+                          <span style={{ fontSize: '11px', color: 'var(--text1)' }}>{v.username}</span>
+                        </div>
+                        <div className="history-time">{new Date(v.createdAt).toLocaleString()}</div>
+
+                        {/* Diff stats */}
+                        {diffStats && (diffStats.added > 0 || diffStats.removed > 0) && (
+                          <div style={{ fontSize: '11px', marginTop: '4px', display: 'flex', gap: '6px' }}>
+                            {diffStats.added > 0 && <span style={{ color: '#22c55e', fontFamily: 'var(--font-mono)' }}>+{diffStats.added}</span>}
+                            {diffStats.removed > 0 && <span style={{ color: '#ef4444', fontFamily: 'var(--font-mono)' }}>-{diffStats.removed}</span>}
+                          </div>
+                        )}
+
+                        {v.reviewedBy && (
+                          <div className="history-reviewer" style={{ marginTop: '4px' }}>
+                            Reviewed by {v.reviewedBy}
+                            {v.reviewedAt && <> · {new Date(v.reviewedAt).toLocaleDateString()}</>}
+                          </div>
+                        )}
+                        {v.reviewComment && (
+                          <div style={{ fontSize: 11, color: '#ef4444', fontStyle: 'italic', marginTop: '2px' }}>
+                            "{v.reviewComment}"
+                          </div>
+                        )}
+
+                        <div className="history-actions" style={{ marginTop: '6px' }}>
+                          <button className="history-btn revert" onClick={() => setViewCodeVersion(v)}>View Changes</button>
+                          {isAdmin && v.status === 'REVIEWED' && (
+                            <button className="history-btn revert" onClick={() => revertToVersion(v.id)}>Revert</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  // Version numbers are assigned newest=highest, oldest=1
+                  const totalVersions = sorted.length;
+
+                  return (
+                    <>
+                      {historyTab === 'approvals' && (
+                        pendingVersions.length === 0
+                          ? <div style={{ padding: '16px 12px', color: 'var(--text2)', fontSize: '12px', textAlign: 'center' }}>✓ No pending approvals</div>
+                          : pendingVersions.map((v, i) => renderApprovalCard(v, i))
+                      )}
+                      {historyTab === 'versions' && (
+                        sorted.length === 0
+                          ? <div style={{ padding: '16px 12px', color: 'var(--text2)', fontSize: '12px', textAlign: 'center' }}>No versions yet</div>
+                          : sorted.map((v, i) => renderVersionCard(v, totalVersions - i))
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Reject dialog */}
+              {rejectDialog && (
+                <div style={{
+                  position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999,
+                }}>
+                  <div style={{
+                    background: 'var(--surface2)', borderRadius: 10, padding: 20, width: 320,
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                  }}>
+                    <h3 style={{ margin: '0 0 12px', color: 'var(--text0)', fontSize: 16 }}>Reject Version</h3>
+                    <p style={{ margin: '0 0 10px', color: 'var(--text1)', fontSize: 13 }}>Add an optional rejection reason:</p>
+                    <textarea
+                      value={rejectComment}
+                      onChange={e => setRejectComment(e.target.value)}
+                      placeholder="e.g. Please handle null inputs before resubmitting..."
+                      rows={4}
+                      style={{
+                        width: '100%', background: 'var(--surface1)', border: '1px solid var(--border)',
+                        color: 'var(--text0)', borderRadius: 6, padding: 8, fontSize: 13, resize: 'vertical',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => { setRejectDialog(null); setRejectComment(''); }}
+                        style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text1)', cursor: 'pointer' }}
+                      >Cancel</button>
+                      <button
+                        onClick={() => rejectVersion(rejectDialog.versionId, rejectComment)}
+                        style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                      >Confirm Reject</button>
+                    </div>
                   </div>
-                )
-              }
+                </div>
+              )}
             </div>
 
             {/* People tab */}
@@ -973,6 +1347,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                 roomId={roomId}
                 currentUserId={user.id}
                 onlineUsers={onlineUsers}
+                inviteCode={inviteCode}
               />
             </div>
           </div>
@@ -996,12 +1371,21 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                   <div className="typing-indicator">{typingText}</div>
                 )}
               </div>
-              <div className="editor-area">
-                <CodeEditor
-                  content={code}
-                  language={activeFile.language}
-                  onChange={handleCodeChange}
-                />
+              <div className="editor-wrapper" style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                {!yjsProvider ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
+                    Connecting to collaborative session...
+                  </div>
+                ) : (
+                  <CodeEditor
+                    content={code}
+                    ytext={yjsProvider.ytext}
+                    awareness={yjsProvider.awareness}
+                    language={activeFile.language}
+                    onChange={handleCodeChange}
+                    readOnly={false}
+                  />
+                )}
               </div>
             </>
           ) : (
@@ -1071,8 +1455,19 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
               filename={activeFile?.name || ''}
               roomId={roomId}
               fileNodeId={activeFile?.id}
+              tree={tree}
               onInsertCode={handleInsertAiCode}
               onClose={() => setShowAiPanel(false)}
+              onFileCreated={async (fileId, fileName) => {
+                // Refresh the file tree so the new file appears immediately
+                await loadTree();
+              }}
+              onCodeUpdated={(fileId, newContent) => {
+                // If the updated file is the active one, push the new content to the editor
+                if (activeFile?.id === fileId) {
+                  setCode(newContent);
+                }
+              }}
             />
           </>
         )}

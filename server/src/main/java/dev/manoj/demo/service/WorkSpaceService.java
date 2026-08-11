@@ -13,6 +13,9 @@ import dev.manoj.demo.websocket.RoomWebSocketHandler;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
+import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 
@@ -24,6 +27,7 @@ import dev.manoj.demo.enums.CodeReviewStatus;
 
 @Service
 @Transactional
+@Slf4j
 public class WorkSpaceService {
 
     private final FileNodeRepository fileNodeRepository;
@@ -32,19 +36,32 @@ public class WorkSpaceService {
     private final CodeVersionRepository codeVersionRepository;
     private final UserRepository userRepository;
     private final RoomWebSocketHandler wsHandler;
+    private final JdbcTemplate jdbcTemplate;
 
     public WorkSpaceService(FileNodeRepository fileNodeRepository,
                             RoomParticipantRepository roomParticipantRepository,
                             RoomRepository roomRepository,
                             CodeVersionRepository codeVersionRepository,
                             UserRepository userRepository,
-                            @Lazy RoomWebSocketHandler wsHandler) {
+                            @Lazy RoomWebSocketHandler wsHandler,
+                            JdbcTemplate jdbcTemplate) {
         this.fileNodeRepository = fileNodeRepository;
         this.roomParticipantRepository = roomParticipantRepository;
         this.roomRepository = roomRepository;
         this.codeVersionRepository = codeVersionRepository;
         this.userRepository = userRepository;
         this.wsHandler = wsHandler;
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @PostConstruct
+    public void fixDbConstraints() {
+        try {
+            jdbcTemplate.execute("ALTER TABLE code_versions DROP CONSTRAINT IF EXISTS code_versions_status_check");
+            log.info("Dropped code_versions_status_check constraint to allow REJECTED status");
+        } catch (Exception e) {
+            log.warn("Failed to drop constraint: {}", e.getMessage());
+        }
     }
 
     // ── Sanitize content: strip null bytes that PostgreSQL rejects in UTF-8 columns ──
@@ -135,6 +152,81 @@ public class WorkSpaceService {
         return versions.stream().map(v -> toDto(v, file.getName())).toList();
     }
 
+    public List<CodeVersionDto> getRoomVersions(UUID roomId, UUID userId) {
+        requireParticipant(roomId, userId);
+        List<CodeVersion> versions = codeVersionRepository.findByFileNode_Room_IdOrderByCreatedAtDesc(roomId);
+        return versions.stream().map(v -> toDto(v, v.getFileNode().getName())).toList();
+    }
+
+    public List<CodeVersionDto> getHistory(UUID roomId, String scopeType, UUID scopeId, UUID userId) {
+        requireParticipant(roomId, userId);
+        List<CodeVersion> versions;
+
+        if ("FILE".equals(scopeType)) {
+            versions = codeVersionRepository.findByFileNode_IdOrderByCreatedAtDesc(scopeId);
+            return versions.stream().map(v -> toDto(v, v.getFileNode().getName())).toList();
+        }
+
+        List<FileNodeInfo> allNodes = fileNodeRepository.findMetadataByRoom_Id(roomId);
+        Map<UUID, String> pathMap = buildPathMap(allNodes);
+
+        if ("CODEBASE".equals(scopeType)) {
+            versions = codeVersionRepository.findByFileNode_Room_IdOrderByCreatedAtDesc(roomId);
+        } else if ("FOLDER".equals(scopeType)) {
+            List<UUID> descendantIds = getDescendantFileIds(allNodes, scopeId);
+            if (descendantIds.isEmpty()) {
+                return List.of();
+            }
+            versions = codeVersionRepository.findByFileNode_IdInOrderByCreatedAtDesc(descendantIds);
+        } else {
+            throw new IllegalArgumentException("Unknown scopeType: " + scopeType);
+        }
+
+        return versions.stream()
+                .map(v -> toDto(v, pathMap.getOrDefault(v.getFileNode().getId(), v.getFileNode().getName())))
+                .toList();
+    }
+
+    private Map<UUID, String> buildPathMap(List<FileNodeInfo> nodes) {
+        Map<UUID, String> pathMap = new java.util.HashMap<>();
+        Map<UUID, FileNodeInfo> nodeMap = new java.util.HashMap<>();
+        for (FileNodeInfo node : nodes) {
+            nodeMap.put(node.getId(), node);
+        }
+        for (FileNodeInfo node : nodes) {
+            if ("FILE".equals(node.getType().name())) {
+                StringBuilder path = new StringBuilder(node.getName());
+                UUID currentParentId = node.getParentId();
+                while (currentParentId != null) {
+                    FileNodeInfo parent = nodeMap.get(currentParentId);
+                    if (parent != null) {
+                        path.insert(0, parent.getName() + "/");
+                        currentParentId = parent.getParentId();
+                    } else {
+                        break;
+                    }
+                }
+                pathMap.put(node.getId(), path.toString());
+            }
+        }
+        return pathMap;
+    }
+
+    private List<UUID> getDescendantFileIds(List<FileNodeInfo> allNodes, UUID folderId) {
+        List<UUID> ids = new java.util.ArrayList<>();
+        List<FileNodeInfo> children = allNodes.stream()
+                .filter(n -> folderId.equals(n.getParentId()))
+                .toList();
+        for (FileNodeInfo child : children) {
+            if ("FILE".equals(child.getType().name())) {
+                ids.add(child.getId());
+            } else {
+                ids.addAll(getDescendantFileIds(allNodes, child.getId()));
+            }
+        }
+        return ids;
+    }
+
     private CodeVersionDto toDto(CodeVersion v, String fileName) {
         CodeVersionDto dto = new CodeVersionDto();
         dto.setId(v.getId());
@@ -152,25 +244,17 @@ public class WorkSpaceService {
     }
 
     /**
-     * Returns all PENDING versions in a room — for the admin review dashboard.
-     * Only admins of the room may call this.
+     * Returns all PENDING versions in a room — used for admin review dashboard and file tree indicators.
+     * Any participant can call this to see which files have pending reviews.
      */
-    public List<CodeVersionDto> getPendingVersions(UUID roomId, UUID adminId) {
-        requireAdmin(roomId, adminId);
-        List<FileNode> roomFiles = fileNodeRepository.findAllByRoom_Id(roomId);
+    public List<CodeVersionDto> getPendingVersions(UUID roomId, UUID userId) {
+        requireParticipant(roomId, userId);
+        List<CodeVersion> pending = codeVersionRepository
+                .findByFileNode_Room_IdAndStatusOrderByCreatedAtDesc(roomId, CodeReviewStatus.PENDING);
         List<CodeVersionDto> result = new ArrayList<>();
-        for (FileNode file : roomFiles) {
-            List<CodeVersion> pending = codeVersionRepository
-                    .findByFileNode_IdOrderByCreatedAtDesc(file.getId())
-                    .stream()
-                    .filter(v -> v.getStatus() == CodeReviewStatus.PENDING)
-                    .toList();
-            for (CodeVersion v : pending) {
-                result.add(toDto(v, file.getName()));
-            }
+        for (CodeVersion v : pending) {
+            result.add(toDto(v, v.getFileNode().getName()));
         }
-        result.sort(Comparator.comparing(CodeVersionDto::getCreatedAt,
-                Comparator.nullsLast(Comparator.naturalOrder())).reversed());
         return result;
     }
 

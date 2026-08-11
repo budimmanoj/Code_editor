@@ -1,828 +1,767 @@
-Implement a **Code Change Approval + Version History + Real-Time WebSocket Synchronization** workflow in the existing CodeRoom application.
+You are working on my existing CodeRoom project, a real-time collaborative code workspace.
 
-The application already has:
+IMPORTANT:
+Do NOT rebuild the project or replace existing functionality.
+Do NOT create a separate file-management system for the AI.
+Use the existing CodeRoom workspace, file/folder APIs, database, WebSocket architecture, editor state, authentication, and version-history system.
 
-* React frontend
-* Spring Boot backend
-* PostgreSQL
-* WebSockets
-* JWT authentication
-* File/folder management
-* Version history
-* Real-time collaborative editing
+GOAL:
+Transform the current AI Assistant from an independent chatbot into a workspace-aware coding assistant that can understand the CodeRoom project and safely read/create/update files.
 
-Do NOT rewrite the existing architecture unnecessarily. First inspect the existing implementation and integrate this feature cleanly with the current code.
-
----
-
-# PART 1 — Code Change Approval Workflow
-
-## Goal
-
-When a normal user modifies code in a workspace, the change must be stored as a **pending revision** and must be reviewed by an administrator before becoming the officially approved version.
-
-The core flow must be:
-
-```text
-User edits code
-      ↓
-Create new revision
-      ↓
-Revision = PENDING
-      ↓
-Store in PostgreSQL
-      ↓
-Admin logs in
-      ↓
-Admin opens History / Pending Reviews
-      ↓
-Admin reviews diff
-      ↓
-Approve OR Reject
-      ↓
-If approved → becomes current approved version
-If rejected → previous approved version remains current
-```
-
----
-
-# PART 2 — Do NOT overwrite the approved code
-
-This is extremely important.
-
-Do NOT simply do:
-
-```text
-files.content = newCode
-```
-
-when a normal user edits a file.
-
-Instead, introduce/extend a versioning model.
-
-Inspect the existing database schema first.
-
-Prefer a structure conceptually like:
-
-### files
-
-```text
-id
-name
-folder_id
-current_version_id
-...
-```
-
-### file_versions
-
-```text
-id
-file_id
-version_number
-content
-created_by
-created_at
-status
-reviewed_by
-reviewed_at
-review_comment
-```
-
-Statuses:
-
-```text
-PENDING
-APPROVED
-REJECTED
-```
-
-Adapt the exact schema to the existing project rather than blindly creating duplicate tables.
-
----
-
-# PART 3 — User edits
-
-When a normal user changes:
-
-```text
-Main.java
-```
-
-create a new version:
-
-```text
-Version 11
-Status = PENDING
-Created by = current user
-```
-
-The currently approved version must remain untouched.
-
-Example:
-
-```text
-Main.java
-
-Version 10
-✓ APPROVED
-System.out.println("Hello");
-
-Version 11
-⏳ PENDING
-System.out.println("Hello World");
-```
-
-The database must clearly distinguish:
-
-```text
-Current approved version
-```
-
-from:
-
-```text
-Pending user changes
-```
-
----
-
-# PART 4 — History UI
-
-Extend the existing History feature.
-
-When Admin opens History/Pending Reviews, show:
-
-```text
-Main.java
-
-Version 11
-Status: Pending Review
-Changed by: User
-Created: <timestamp>
-
-[Review Changes]
-```
-
-When the admin opens the revision, display a proper code diff.
+CURRENT PROBLEM:
+The AI Assistant currently works independently from the code editor.
 
 For example:
 
-```text
-- System.out.println("Hello");
-+ System.out.println("Hello World");
-```
+User has:
+    code.js
 
-Clearly distinguish:
+with actual code inside the editor.
 
-* Added lines
-* Removed lines
-* Unchanged lines
+User asks:
+    "What code is present in code.js?"
 
-Use the existing editor/diff components if available.
+The AI currently responds:
+    "I don't have direct access to your local workspace or file system."
 
----
+This behavior must be eliminated.
 
-# PART 5 — Admin approval
+The AI should understand the CodeRoom workspace through controlled application context and APIs.
 
-Only users with the ADMIN role can approve or reject changes.
+==================================================
+1. FIRST: STUDY THE EXISTING CODEBASE
+==================================================
 
-The backend MUST enforce this.
+Before changing anything, inspect the entire relevant architecture.
 
-Do not rely only on hiding buttons in React.
+Identify:
 
-Create/extend backend APIs such as:
+FRONTEND:
+- EditorPage
+- AiPanel
+- CodeMirror/editor component
+- workspace/file explorer
+- active file state
+- file loading logic
+- file creation/update/delete APIs
+- WebSocket logic
+- authentication
+- current AI API client
 
-```text
-GET  /api/reviews/pending
-GET  /api/reviews/{revisionId}
-POST /api/reviews/{revisionId}/approve
-POST /api/reviews/{revisionId}/reject
-GET  /api/files/{fileId}/history
-```
+BACKEND:
+- AI controller
+- AI service / ModelService
+- file controllers/services
+- folder/project/room services
+- repositories
+- entities
+- WebSocket handlers
+- authentication/JWT
+- version history
+- database schema
 
-Adapt the endpoints to the existing API conventions.
+Understand how the currently opened file is represented and where its latest content comes from.
 
----
+DO NOT assume the architecture.
+Inspect the actual code and reuse the existing implementation.
 
-## Approve
+==================================================
+2. DESIGN A WORKSPACE-AWARE AI CONTEXT
+==================================================
 
-When Admin clicks:
+The AI request should contain enough context for the model to understand what the user is currently working on.
 
-```text
-Approve
-```
+At minimum support:
 
-perform the operation transactionally:
-
-```text
-Pending version
-      ↓
-STATUS = APPROVED
-      ↓
-files.current_version_id = approved version
-      ↓
-Record reviewer + timestamp
-```
-
-Only after successful database commit should the system notify connected clients.
-
----
-
-## Reject
-
-When Admin clicks:
-
-```text
-Reject
-```
-
-the revision becomes:
-
-```text
-STATUS = REJECTED
-```
-
-and the previous approved version remains the current approved version.
-
-Allow the admin to provide an optional rejection comment.
+- room/project ID
+- active file ID
+- active file name
+- active file path
+- programming language
+- current file content
+- current cursor/selection if useful
+- workspace tree
 
 Example:
 
-```text
-Rejected
+{
+  "message": "What code is present in code.js?",
+  "roomId": "...",
+  "activeFile": {
+      "id": "...",
+      "name": "code.js",
+      "path": "/src/code.js",
+      "language": "javascript",
+      "content": "..."
+  },
+  "workspace": {
+      "tree": [...]
+  }
+}
 
-Reason:
-"Please handle null input before submitting."
-```
+Do NOT blindly send the entire workspace on every request.
 
----
+Design the context efficiently.
 
-# PART 6 — WebSocket behavior
+==================================================
+3. CONTEXT STRATEGY
+==================================================
 
-The existing application uses WebSockets for real-time collaboration.
+Implement context levels.
 
-Do NOT break the current WebSocket behavior.
+LEVEL 1 — CURRENT FILE
 
-We need to verify and, if necessary, fix synchronization.
+For questions about the currently open file, send only:
 
-The desired behavior is:
+- current file metadata
+- current file content
+- relevant selection/cursor
 
-```text
-User A
-Port 3000
-      │
-      │ edits Main.java
-      ↓
-WebSocket
-      ↓
-Spring Boot
-      ↓
-WebSocket
-      ↓
-User B
-Port 3001
-```
+Example:
 
-User B must see User A's changes in real time.
+"What does this function do?"
 
----
+→ send the relevant current file context.
 
-# PART 7 — VERY IMPORTANT: Test with TWO separate users
+LEVEL 2 — SELECTED FILES
 
-After implementation, perform an actual multi-client WebSocket test.
+Allow the user to explicitly reference files.
+
+Example:
+
+"Compare code.js and utils.js."
+
+Only send those files.
+
+LEVEL 3 — FOLDER
+
+Allow AI to inspect files inside a selected folder.
+
+Example:
+
+"Find bugs in the authentication folder."
+
+Retrieve only relevant files from that folder.
+
+LEVEL 4 — WORKSPACE
+
+For questions requiring project-wide understanding:
+
+"Why is authentication failing?"
+
+Allow the AI to inspect the workspace structure and retrieve relevant files.
+
+Do NOT send huge workspaces blindly.
+
+Use a context budget/token limit and retrieve only relevant files.
+
+==================================================
+4. AI TOOL / ACTION ARCHITECTURE
+==================================================
+
+The AI should not directly manipulate the database.
+
+Create a controlled application-level tool/action system.
+
+Support actions such as:
+
+READ_FILE
+LIST_FILES
+READ_FOLDER
+CREATE_FILE
+UPDATE_FILE
+DELETE_FILE
+RENAME_FILE
+CREATE_FOLDER
+
+The AI should request actions through structured JSON.
+
+Example:
+
+{
+  "action": "READ_FILE",
+  "fileId": "123"
+}
+
+For creation:
+
+{
+  "action": "CREATE_FILE",
+  "parentFolderId": "456",
+  "fileName": "sum.cpp",
+  "language": "cpp",
+  "content": "..."
+}
+
+For updating:
+
+{
+  "action": "UPDATE_FILE",
+  "fileId": "123",
+  "content": "..."
+}
+
+The backend must validate every action.
+
+The AI must NEVER receive unrestricted database access.
+
+==================================================
+5. FILE CREATION
+==================================================
+
+If the user says:
+
+"Create a C++ file that calculates the sum of N numbers."
+
+The AI should not merely return code in chat.
+
+It should generate a structured CREATE_FILE action.
+
+Frontend should display:
+
+AI wants to create:
+
+sum.cpp
+
+[code preview]
+
+[Create File] [Cancel]
+
+Only after user confirmation should the frontend/backend execute the action.
+
+After creation:
+
+- update workspace explorer
+- persist file in PostgreSQL
+- open the newly created file in the editor
+- synchronize through existing WebSocket mechanisms if required
+- maintain version history where appropriate
+
+==================================================
+6. FILE MODIFICATION
+==================================================
+
+If user says:
+
+"Add error handling to code.js."
+
+Do NOT blindly overwrite the file.
+
+AI should generate a proposed change.
+
+Prefer a diff-based approach:
+
+{
+  "action": "UPDATE_FILE",
+  "fileId": "...",
+  "changes": [
+      {
+          "startLine": 10,
+          "endLine": 15,
+          "replacement": "..."
+      }
+  ]
+}
+
+Frontend should show:
+
+AI proposed changes to code.js
+
+[diff viewer]
+
+[Apply Changes] [Reject]
+
+Only Apply Changes modifies the actual file.
+
+==================================================
+7. VERSION HISTORY
+==================================================
+
+Integrate AI modifications with the existing CodeRoom version-history system.
+
+Every AI modification should be traceable.
+
+Example:
+
+Version 17
+    ↓
+AI modification
+    ↓
+Version 18
+
+User must be able to revert AI-generated changes using the existing version-history mechanism.
+
+Do NOT create a second version-history system.
+
+==================================================
+8. CHAT COMMANDS / MENTIONS
+==================================================
+
+Integrate with the existing @ mention system.
+
+Support concepts such as:
+
+@file
+@folder
+@workspace
+
+Examples:
+
+@file code.js explain this
+
+@file utils.js review this
+
+@folder auth find security problems
+
+@workspace explain the authentication architecture
+
+If the existing mention UI already exists, improve/integrate it instead of replacing it.
+
+The mention dropdown must not overlap the chat input or Chat button.
+
+==================================================
+9. CURRENT FILE MUST ALWAYS BE AVAILABLE
+==================================================
+
+When the user opens:
+
+code.js
+
+the AI should know that:
+
+ACTIVE FILE = code.js
+
+If the user switches to:
+
+hello.js
+
+the AI context must automatically become:
+
+ACTIVE FILE = hello.js
+
+If the user asks:
+
+"What code is present in this file?"
+
+the AI should receive the currently active file content.
+
+Do NOT hardcode file names.
+
+==================================================
+10. HANDLE EDITOR STATE CORRECTLY
+==================================================
+
+Important:
+
+The editor may contain unsaved changes.
+
+The AI should preferably receive the latest editor state rather than stale database content.
+
+Design the frontend so that:
+
+Editor state
+    ↓
+AI context
+
+and not necessarily:
+
+Database
+    ↓
+AI context
+
+If the file has unsaved changes, AI should see the latest content.
+
+After an AI modification, update:
+
+Editor
+Database
+WebSocket collaboration state
+Version history
+
+consistently.
+
+==================================================
+11. SECURITY
+==================================================
+
+Never trust AI-generated file IDs, paths, folder IDs, or room IDs.
+
+Backend must verify:
+
+- authenticated user
+- room membership
+- file belongs to room
+- folder belongs to room
+- user has permission to modify the resource
+- requested operation is allowed
+
+Prevent:
+
+- path traversal
+- cross-room file access
+- unauthorized file modification
+- arbitrary database queries
+- arbitrary filesystem access
+
+The AI should only operate within the authenticated CodeRoom workspace.
+
+==================================================
+12. EFFICIENCY
+==================================================
+
+Do NOT send all files to Gemini on every message.
 
 Use:
 
-```text
-Browser/Client 1
-Port: 3000
-Account: User A
-```
+- active-file context
+- explicit file references
+- workspace tree
+- selective file retrieval
+- context/token limits
+- relevant-file retrieval
 
-and:
+For large projects, use a retrieval strategy.
 
-```text
-Browser/Client 2
-Port: 3001
-Account: User B
-```
+For example:
 
-Both users must enter the SAME room/workspace.
+User:
+"Why is login failing?"
 
-Do not use the same account in both clients.
+System:
+1. inspect workspace tree
+2. identify authentication-related files
+3. retrieve relevant files
+4. provide those files to the AI
+5. generate answer
 
-Use two separate authenticated accounts.
+Do not send unrelated files such as:
 
----
+README
+images
+node_modules
+generated files
+build output
+etc.
 
-# PART 8 — WebSocket test scenario
+==================================================
+13. AI RESPONSE TYPES
+==================================================
 
-Perform this exact test:
+Design the backend response so it can distinguish between:
 
-### Step 1
+TEXT_RESPONSE
 
-Start the backend.
+CODE_RESPONSE
 
-Start frontend instance 1 on:
+CREATE_FILE
 
-```text
-http://localhost:3000
-```
+UPDATE_FILE
 
-Login as:
+DELETE_FILE
 
-```text
-User A
-```
+RENAME_FILE
 
-Join the same workspace/room.
+CREATE_FOLDER
 
----
+READ_FILE
 
-### Step 2
-
-Start another frontend instance on:
-
-```text
-http://localhost:3001
-```
-
-Login as:
-
-```text
-User B
-```
-
-Join the SAME workspace/room.
-
----
-
-### Step 3
-
-Verify WebSocket connections.
-
-Check browser DevTools → Network → WS.
-
-Confirm both clients establish a WebSocket connection.
-
-Verify:
-
-```text
-Client A → connected
-Client B → connected
-```
-
-Also inspect WebSocket messages.
-
----
-
-### Step 4
-
-On port 3000:
-
-Open:
-
-```text
-Main.java
-```
-
-Change:
-
-```java
-System.out.println("Hello");
-```
-
-to:
-
-```java
-System.out.println("Hello World");
-```
-
----
-
-### Step 5
-
-Verify port 3001.
-
-The change made by User A should appear in User B's editor without manually refreshing the page.
-
-Test:
-
-```text
-User A types
-      ↓
-WebSocket message
-      ↓
-Backend
-      ↓
-Broadcast to room
-      ↓
-User B editor updates
-```
-
----
-
-# PART 9 — Test both directions
-
-Do NOT only test:
-
-```text
-User A → User B
-```
-
-Also test:
-
-```text
-User B → User A
-```
-
-User B changes:
-
-```java
-System.out.println("Changed by User B");
-```
-
-and verify User A receives the change.
-
----
-
-# PART 10 — Test simultaneous editing
-
-Test:
-
-```text
-User A typing
-+
-User B typing
-```
-
-at the same time.
-
-Check whether:
-
-* Changes are lost
-* Text gets overwritten
-* Duplicate content appears
-* Cursor jumps unexpectedly
-* Editor becomes inconsistent
-* WebSocket messages arrive out of order
-* One user's changes overwrite another user's changes
-
-If the current system does not implement a true conflict-resolution mechanism, document the limitation rather than pretending it is solved.
-
----
-
-# PART 11 — WebSocket reconnection testing
-
-Test:
-
-```text
-User A connected
-User B connected
-```
-
-Then disconnect User B's network/WebSocket.
-
-While B is disconnected:
-
-```text
-User A edits file
-```
-
-Reconnect User B.
-
-Verify what happens.
-
-The system should synchronize B to the latest correct state rather than leaving B with stale content.
-
-If this is not currently supported, identify the missing mechanism and implement a clean resynchronization strategy where appropriate.
-
----
-
-# PART 12 — Room isolation testing
-
-This is critical.
-
-Create:
-
-```text
-Room A
-Room B
-```
-
-Connect users to different rooms.
-
-Verify:
-
-```text
-User A in Room A
-      ↓
-Edit file
-      ↓
-Only Room A clients receive the update
-```
-
-A user connected to Room B must NOT receive Room A's WebSocket messages.
-
----
-
-# PART 13 — Authentication and authorization
-
-Verify:
-
-### Normal user
-
-Can:
-
-```text
-Edit code
-Create pending revision
-View their changes
-View history
-```
-
-Cannot:
-
-```text
-Approve
-Reject
-Change review status directly
-```
-
-### Admin
-
-Can:
-
-```text
-View pending reviews
-View history
-View diff
-Approve
-Reject
-```
-
-The backend must enforce these permissions.
-
-Test by directly calling the APIs as a normal user, not just through the UI.
-
----
-
-# PART 14 — Approval + WebSocket integration
-
-This is extremely important.
-
-There are two different concepts:
-
-### Collaborative editing
-
-```text
-User A changes code
-      ↓
-WebSocket
-      ↓
-Other collaborators see the working change
-```
-
-### Official approval
-
-```text
-User submits change
-      ↓
-PENDING revision
-      ↓
-Admin reviews
-      ↓
-APPROVED
-      ↓
-Official current version changes
-```
-
-Do not mix these two concepts.
-
-The WebSocket should synchronize the collaborative editing state according to the existing application's design, while the database must maintain the approved/pending revision state correctly.
-
-When Admin approves a revision, broadcast an appropriate event so connected clients know that the revision has become officially approved.
-
----
-
-# PART 15 — Prevent duplicate / inconsistent versions
-
-Consider this situation:
-
-```text
-User edits
-   ↓
-Save request
-   ↓
-Network timeout
-   ↓
-Frontend retries
-```
-
-Make sure the same change is not accidentally stored multiple times.
-
-Inspect the current architecture and implement idempotency/unique revision handling if required.
-
----
-
-# PART 16 — Database consistency
-
-Verify that:
-
-```text
-files.current_version_id
-```
-
-always points to the correct approved version.
+etc.
 
 Example:
 
-```text
-Version 10 → APPROVED
-Version 11 → PENDING
-```
+{
+  "type": "TEXT_RESPONSE",
+  "message": "code.js currently contains..."
+}
 
-Then:
+or:
 
-```text
-current_version_id = 10
-```
+{
+  "type": "ACTION",
+  "action": {
+      "type": "CREATE_FILE",
+      "fileName": "sum.cpp",
+      "content": "..."
+  }
+}
 
-After Admin approves Version 11:
+Do not force the frontend to parse natural-language AI responses to determine actions.
 
-```text
-Version 10 → APPROVED
-Version 11 → APPROVED
+==================================================
+14. EXISTING AI API
+==================================================
 
-current_version_id = 11
-```
+Inspect the existing:
 
-If Version 11 is rejected:
+POST /api/ai/chat
 
-```text
-Version 10 → APPROVED
-Version 11 → REJECTED
+Do not unnecessarily replace it.
 
-current_version_id = 10
-```
+Extend it to support workspace context and structured actions.
 
-Never point the current approved version to a rejected or pending revision.
+Maintain backward compatibility where practical.
 
-Use transactions where necessary.
+If a new endpoint is genuinely required, explain why before implementing it.
 
----
+==================================================
+15. GEMINI INTEGRATION
+==================================================
 
-# PART 17 — Test cases
+Use the existing Gemini integration.
 
-Perform and document at least these tests.
+Do not create another Gemini client if one already exists.
 
-### Approval
+Inspect the existing ModelService and configuration.
 
-```text
-1. User edits file
-2. Pending version created
-3. Admin sees pending review
-4. Admin opens history
-5. Admin sees correct diff
-6. Admin approves
-7. Current version changes
-8. Other clients receive approval update
-```
+Use the currently supported Gemini model and API format.
 
-### Rejection
+Keep Gemini-specific logic isolated inside the AI service layer.
 
-```text
-1. User edits file
-2. Pending version created
-3. Admin rejects
-4. Rejection reason saved
-5. Approved version remains unchanged
-6. User sees rejection status
-```
+The rest of CodeRoom should not depend directly on Gemini APIs.
 
-### WebSocket
+==================================================
+16. ERROR HANDLING
+==================================================
 
-```text
-1. User A → User B
-2. User B → User A
-3. Simultaneous edits
-4. Reconnect
-5. Room isolation
-6. Multiple users
-7. WebSocket disconnect
-8. WebSocket reconnect
-```
+Handle:
 
-### Authorization
+- Gemini unavailable
+- invalid model
+- API timeout
+- rate limit
+- malformed AI action
+- file not found
+- permission denied
+- stale editor state
+- WebSocket synchronization failure
 
-```text
-1. Normal user attempts approve API → 403
-2. Normal user attempts reject API → 403
-3. Admin approve → success
-4. Admin reject → success
-```
+The UI should show meaningful errors.
 
-### Database
+Never expose API keys or internal backend details.
 
-```text
-1. Pending revision does not replace approved version
-2. Approved revision becomes current
-3. Rejected revision never becomes current
-4. History remains immutable
-5. No duplicate revisions
-6. Correct reviewer is recorded
-```
+==================================================
+17. UI/UX
+==================================================
 
----
+The AI should feel integrated into the editor.
 
-# PART 18 — Performance / room entry
+Example:
 
-Also investigate the issue where:
+User:
+"What code is in this file?"
 
-```text
-Login
-  ↓
-Enter room
-  ↓
-UI takes time before becoming interactive
-```
+AI:
+"`code.js` currently contains a JavaScript function that..."
 
-Do NOT assume the cause.
+User:
+"Create a function to calculate factorial."
 
-Measure the room-entry flow.
+AI:
+"Here's the proposed change."
 
-Check whether the frontend is downloading the contents of every file immediately.
+[View Diff]
 
-Prefer:
+[Apply]
 
-```text
-Enter room
-   ↓
-Load room metadata
-   ↓
-Load file/folder tree
-   ↓
-Render UI immediately
-   ↓
-Load file content lazily when a file is opened
-```
+User:
+"Create a new file called factorial.cpp."
 
-Do not load hundreds of file contents unnecessarily when the user only needs the file tree.
+AI:
+"Create `factorial.cpp`?"
 
-Measure:
+[Create File]
 
-* API response time
-* Number of API requests
-* Total response payload size
-* Database query time
-* Frontend processing time
-* React rendering time
-* WebSocket connection time
+The AI panel should visually distinguish:
 
-Identify the actual bottleneck before changing the architecture.
+- normal answers
+- code blocks
+- file creation
+- file modifications
+- errors
+- action confirmations
 
----
+==================================================
+18. DO NOT BREAK EXISTING FEATURES
+==================================================
 
-# Final requirements
+Existing functionality must continue working:
 
-Before making changes:
+- authentication
+- rooms
+- collaboration
+- WebSockets
+- file explorer
+- folders
+- CodeMirror
+- file CRUD
+- version history
+- presence
+- typing indicators
+- AI chat
+- existing REST APIs
 
-1. Inspect the existing codebase.
-2. Understand the current file/version/history implementation.
-3. Understand the current WebSocket implementation.
-4. Understand the JWT/role implementation.
-5. Understand the current database schema.
-6. Understand how room joining works.
-7. Identify existing APIs before creating new ones.
+Before modifying an existing service/component, understand how it is currently used.
 
-Then implement the feature incrementally.
+==================================================
+19. IMPLEMENTATION PROCESS
+==================================================
 
-Do not break:
+Follow this order:
 
-* Existing authentication
-* Existing room functionality
-* Existing file/folder management
-* Existing WebSocket collaboration
-* Existing version history
-* Existing editor behavior
+STEP 1:
+Inspect the existing project architecture.
 
-At the end, provide:
+STEP 2:
+Identify existing file/workspace state flow.
 
-```text
-1. Files modified
-2. Database changes
+STEP 3:
+Design the AI context contract.
+
+STEP 4:
+Implement current-file context first.
+
+STEP 5:
+Test:
+"What code is present in the currently opened file?"
+
+STEP 6:
+Implement workspace/file retrieval.
+
+STEP 7:
+Implement structured AI actions.
+
+STEP 8:
+Implement CREATE_FILE with confirmation.
+
+STEP 9:
+Implement UPDATE_FILE with diff + confirmation.
+
+STEP 10:
+Integrate version history.
+
+STEP 11:
+Test WebSocket synchronization.
+
+STEP 12:
+Test permissions/security.
+
+STEP 13:
+Run the complete frontend and backend.
+
+==================================================
+20. TEST CASES
+==================================================
+
+You MUST verify these cases:
+
+1.
+Open code.js.
+
+Ask:
+"What code is present in this file?"
+
+Expected:
+AI correctly describes actual code.js content.
+
+2.
+Switch to hello.js.
+
+Ask:
+"What is this file doing?"
+
+Expected:
+AI uses hello.js, NOT code.js.
+
+3.
+Ask:
+"Explain the function on line 20."
+
+Expected:
+AI uses current file context.
+
+4.
+Ask:
+"Create sum.cpp that calculates the sum of N numbers."
+
+Expected:
+AI proposes CREATE_FILE.
+
+5.
+Click Create.
+
+Expected:
+File appears in explorer and opens in editor.
+
+6.
+Ask:
+"Add error handling to this file."
+
+Expected:
+AI proposes a diff.
+
+7.
+Reject the change.
+
+Expected:
+File remains unchanged.
+
+8.
+Apply the change.
+
+Expected:
+Editor, database, WebSocket state and version history remain consistent.
+
+9.
+Ask:
+"Compare code.js and utils.js."
+
+Expected:
+Only those relevant files are provided.
+
+10.
+Ask:
+"Find authentication problems in the project."
+
+Expected:
+AI retrieves relevant project files instead of receiving the entire workspace blindly.
+
+==================================================
+FINAL REQUIREMENT
+==================================================
+
+Do not just make the chatbot receive a giant string containing all files.
+
+Build a clean, scalable "AI Workspace Context + Controlled Tool Execution" architecture.
+
+The final system should behave like:
+
+CodeRoom Editor
+      ↕
+Workspace State
+      ↕
+AI Context Manager
+      ↕
+AI Service / Gemini
+      ↕
+Structured Tool Actions
+      ↕
+CodeRoom File/Folder Services
+      ↕
+PostgreSQL + WebSocket + Version History
+
+The AI is an assistant INSIDE CodeRoom, not a separate chatbot.
+
+Before finishing, provide:
+
+1. Files changed
+2. Architecture implemented
 3. API changes
-4. WebSocket changes
-5. Frontend changes
-6. Approval workflow
-7. Rejection workflow
-8. WebSocket test results for ports 3000 and 3001
-9. Room isolation test results
-10. Reconnection test results
-11. Authorization test results
-12. Performance findings for room entry
-13. Remaining limitations
-```
+4. AI context format
+5. Supported AI actions
+6. Security considerations
+7. How file creation/update works
+8. How version history is preserved
+9. Tests performed
+10. Any remaining limitations
 
-Do not claim a test passed unless you actually executed it and verified the result.
+Do not claim something is implemented unless you actually implemented and tested it.

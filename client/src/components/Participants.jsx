@@ -15,7 +15,7 @@ const ROLE_COLORS = {
  *   currentUserId — UUID string of the logged-in user
  *   onlineUsers   — Map<userId, {userId, username, color}> from WebSocket presence
  */
-export default function Participants({ participants, currentUserId, onlineUsers = new Map() }) {
+export default function Participants({ participants, currentUserId, onlineUsers = new Map(), inviteCode }) {
   if (!participants || participants.length === 0) {
     return (
       <div className="participants-empty">
@@ -45,6 +45,28 @@ export default function Participants({ participants, currentUserId, onlineUsers 
           <span className="participants-count">{participants.length}</span>
         </div>
       </div>
+
+      {inviteCode && (
+        <div style={{
+          margin: '12px 16px', padding: '12px', background: 'var(--surface1)',
+          borderRadius: 8, border: '1px solid var(--border)',
+          display: 'flex', flexDirection: 'column', gap: 6
+        }}>
+          <span style={{ fontSize: 11, color: 'var(--text1)', fontWeight: 600, textTransform: 'uppercase' }}>Invite Code</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <code style={{ fontSize: 18, color: 'var(--text0)', fontWeight: 700, letterSpacing: 2 }}>{inviteCode}</code>
+            <button
+              onClick={() => { navigator.clipboard.writeText(inviteCode); alert('Invite code copied!'); }}
+              style={{
+                background: 'var(--accent)', color: '#fff', border: 'none',
+                padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600
+              }}
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      )}
 
       {admins.length > 0 && (
         <>
@@ -101,7 +123,9 @@ function ParticipantRow({ p, isMe, onlineInfo }) {
           {p.candidateName || p.email}
           {isMe && <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 5 }}>(you)</span>}
         </span>
-        <span className="participant-email">{p.email}</span>
+        <div style={{ fontSize: '11px', color: isOnline ? '#22c55e' : 'var(--text1)' }}>
+          {isOnline ? 'Online' : 'Offline'}
+        </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

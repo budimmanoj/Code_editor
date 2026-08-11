@@ -2,9 +2,7 @@ package dev.manoj.demo.websocket;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.manoj.demo.repository.FileNodeRepository;
 import dev.manoj.demo.repository.UserRepository;
-import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -44,19 +42,14 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     // roomId → (userId → color)
     private final Map<String, Map<String, String>> roomUserColors = new ConcurrentHashMap<>();
 
-    // Debounced DB saves: fileId → pending future
-    private final Map<String, ScheduledFuture<?>> saveTimers = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "ws-db-save");
-        t.setDaemon(true);
-        return t;
-    });
+    // fileId → list of raw Yjs updates
+    private final Map<String, List<JsonNode>> yjsFileBuffers = new ConcurrentHashMap<>();
 
-    private final FileNodeRepository fileNodeRepository;
+
+
     private final UserRepository userRepository;
 
-    public RoomWebSocketHandler(FileNodeRepository fileNodeRepository, UserRepository userRepository) {
-        this.fileNodeRepository = fileNodeRepository;
+    public RoomWebSocketHandler(UserRepository userRepository) {
         this.userRepository = userRepository;
     }
 
@@ -120,12 +113,42 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
 
         String type = node.path("type").asText("");
         switch (type) {
-            case "CODE_UPDATE"   -> handleCodeUpdate(session, node, info);
             case "CURSOR_UPDATE" -> handleCursorUpdate(session, node, info);
             case "TYPING"        -> handleTyping(session, node, info);
+            case "YJS_UPDATE"    -> handleYjsUpdate(session, node, info);
+            case "YJS_AWARENESS" -> handleYjsAwareness(session, node, info);
+            case "YJS_REQUEST_STATE" -> handleYjsRequestState(session, node, info);
             default              -> log.debug("[WS] Unknown message type: {}", type);
         }
     }
+
+    private void handleYjsUpdate(WebSocketSession session, JsonNode node, SessionInfo info) {
+        String fileId = node.path("fileId").asText("");
+        if (!fileId.isBlank()) {
+            JsonNode updateNode = node.path("update");
+            if (updateNode != null && !updateNode.isMissingNode()) {
+                yjsFileBuffers.computeIfAbsent(fileId, k -> new CopyOnWriteArrayList<>()).add(updateNode);
+            }
+        }
+        // Forward Yjs updates to all OTHER participants in the room unchanged
+        broadcastToRoom(info.roomId, session.getId(), node);
+    }
+
+    private void handleYjsAwareness(WebSocketSession session, JsonNode node, SessionInfo info) {
+        broadcastToRoom(info.roomId, session.getId(), node);
+    }
+
+    private void handleYjsRequestState(WebSocketSession session, JsonNode node, SessionInfo info) {
+        String fileId = node.path("fileId").asText("");
+        if (fileId.isBlank()) return;
+        List<JsonNode> buffer = yjsFileBuffers.getOrDefault(fileId, Collections.emptyList());
+        sendTo(session, Map.of(
+            "type", "YJS_STATE_RESPONSE",
+            "fileId", fileId,
+            "updates", buffer
+        ));
+    }
+
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
@@ -156,24 +179,6 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
     }
 
     // ── Message handlers ──────────────────────────────────────────────────────
-
-    private void handleCodeUpdate(WebSocketSession session, JsonNode node, SessionInfo info) {
-        String fileId = node.path("fileId").asText("");
-        String content = node.path("content").asText("");
-        if (fileId.isBlank()) return;
-
-        // Broadcast to all other users in this room
-        broadcastToRoom(info.roomId, session.getId(), Map.of(
-            "type", "CODE_UPDATE",
-            "fileId", fileId,
-            "content", content,
-            "userId", info.userId,
-            "username", info.username
-        ));
-
-        // Debounced DB save (3 seconds after last update)
-        scheduleDbSave(fileId, content);
-    }
 
     private void handleCursorUpdate(WebSocketSession session, JsonNode node, SessionInfo info) {
         String fileId = node.path("fileId").asText("");
@@ -245,6 +250,15 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /**
+     * Public broadcast used by the HTTP layer (e.g. WorkSpaceService) to notify
+     * ALL connected clients in a room of server-side events such as REVISION_APPROVED
+     * or REVISION_REJECTED — where there is no "sender" session to exclude.
+     */
+    public void broadcastToAllInRoom(String roomId, Object data) {
+        broadcastToRoom(roomId, null, data);
+    }
+
     private String assignColor(String roomId, String userId) {
         Map<String, String> colorMap = roomUserColors
                 .computeIfAbsent(roomId, k -> new ConcurrentHashMap<>());
@@ -270,34 +284,7 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         return list;
     }
 
-    /** Save content to DB 3 seconds after the last CODE_UPDATE for this file. */
-    private void scheduleDbSave(String fileId, String content) {
-        ScheduledFuture<?> existing = saveTimers.remove(fileId);
-        if (existing != null) existing.cancel(false);
 
-        ScheduledFuture<?> future = scheduler.schedule(() -> {
-            saveTimers.remove(fileId);
-            try {
-                UUID id = UUID.fromString(fileId);
-                fileNodeRepository.findById(id).ifPresent(node -> {
-                    // Strip null bytes that PostgreSQL rejects
-                    String safe = content != null ? content.replace("\u0000", "") : "";
-                    node.setContent(safe);
-                    fileNodeRepository.save(node);
-                    log.debug("[WS] Auto-saved file {}", fileId);
-                });
-            } catch (Exception e) {
-                log.error("[WS] Failed to auto-save file {}: {}", fileId, e.getMessage());
-            }
-        }, 3, TimeUnit.SECONDS);
-
-        saveTimers.put(fileId, future);
-    }
-
-    @PreDestroy
-    public void destroy() {
-        scheduler.shutdownNow();
-    }
 
     // ── Session metadata ──────────────────────────────────────────────────────
 

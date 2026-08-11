@@ -27,8 +27,20 @@ public class JwtUtil {
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim("email", email)
+                .claim("purpose", "auth")
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expirationMs))
+                .signWith(key)
+                .compact();
+    }
+
+    public String generateResetToken(UUID userId, String email) {
+        return Jwts.builder()
+                .subject(userId.toString())
+                .claim("email", email)
+                .claim("purpose", "reset")
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000)) // 15 minutes
                 .signWith(key)
                 .compact();
     }
@@ -43,6 +55,24 @@ public class JwtUtil {
 
     public UUID extractUserId(String token) {
         return UUID.fromString(parse(token).getSubject());
+    }
+
+    public boolean isValidAuthToken(String token) {
+        try { 
+            Claims claims = parse(token); 
+            return "auth".equals(claims.get("purpose", String.class));
+        } catch (JwtException | IllegalArgumentException e) { 
+            return false; 
+        }
+    }
+    
+    public boolean isValidResetToken(String token) {
+        try { 
+            Claims claims = parse(token); 
+            return "reset".equals(claims.get("purpose", String.class));
+        } catch (JwtException | IllegalArgumentException e) { 
+            return false; 
+        }
     }
 
     public boolean isValid(String token) {

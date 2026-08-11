@@ -51,6 +51,14 @@ export default function LobbyPage({ user, onEnterRoom, onLogout }) {
 
   return (
     <div className="lobby-bg">
+      <div className="lobby-watermark">
+        <span style={{ color: '#a7f3d0' }}>CODE</span>
+        <span style={{ color: '#065f46' }}>ROOM</span>
+      </div>
+      <div className="lobby-description">
+        Experience real-time collaborative coding with zero friction.
+        <br />Built for high-performance teams and seamless pair programming.
+      </div>
       <div className="lobby-glow" />
 
       <div className="lobby-card">
@@ -128,6 +136,68 @@ export default function LobbyPage({ user, onEnterRoom, onLogout }) {
 }
 
 function ProfilePanel({ user, profile, onEnterRoom }) {
+  const [changeMode, setChangeMode] = useState(null); // 'current' or 'otp'
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '', otp: '' });
+  const [msg, setMsg] = useState({ text: '', type: '' });
+  const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
+  useEffect(() => {
+    let timer;
+    if (countdown > 0) {
+      timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const startCountdown = () => setCountdown(30);
+
+  const handleSendOtp = async () => {
+    if (countdown > 0) return;
+    setMsg({ text: '', type: '' });
+    setLoading(true);
+    try {
+      const res = await api.sendChangePasswordOtp();
+      setMsg({ text: res.message, type: 'success' });
+      startCountdown();
+    } catch (err) {
+      setMsg({ text: err.message, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setMsg({ text: '', type: '' });
+    setLoading(true);
+    try {
+      let res;
+      if (changeMode === 'current') {
+        res = await api.changePassword({
+          currentPassword: form.currentPassword,
+          newPassword: form.newPassword,
+          confirmPassword: form.confirmPassword
+        });
+      } else if (changeMode === 'otp') {
+        res = await api.changePasswordWithOtp({
+          otp: form.otp,
+          newPassword: form.newPassword,
+          confirmPassword: form.confirmPassword
+        });
+      }
+      setMsg({ text: res.message, type: 'success' });
+      setChangeMode(null);
+      setForm({ currentPassword: '', newPassword: '', confirmPassword: '', otp: '' });
+    } catch (err) {
+      setMsg({ text: err.message, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div>
       <div className="profile-header">
@@ -138,13 +208,50 @@ function ProfilePanel({ user, profile, onEnterRoom }) {
         </div>
       </div>
 
+      <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 24 }}>
+        <h3 style={{ fontSize: 13, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16 }}>Changing Password</h3>
+        
+        {!changeMode ? (
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button className="btn-secondary" onClick={() => setChangeMode('current')}>Change Password</button>
+            <button className="btn-secondary" onClick={() => { setChangeMode('otp'); handleSendOtp(); }}>Change with Email OTP</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 300 }}>
+            {changeMode === 'current' && (
+              <input className="input-field" type="password" placeholder="Current Password" value={form.currentPassword} onChange={set('currentPassword')} required />
+            )}
+            {changeMode === 'otp' && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="input-field" type="text" maxLength={6} placeholder="6-digit OTP" value={form.otp} onChange={set('otp')} required />
+                <button type="button" className="btn-secondary" onClick={handleSendOtp} disabled={countdown > 0}>{countdown > 0 ? `${countdown}s` : 'Resend'}</button>
+              </div>
+            )}
+            
+            <input className="input-field" type="password" placeholder="New Password" value={form.newPassword} onChange={set('newPassword')} required />
+            <input className="input-field" type="password" placeholder="Confirm New Password" value={form.confirmPassword} onChange={set('confirmPassword')} required />
+            
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'Saving...' : 'Save Password'}</button>
+              <button type="button" className="btn-secondary" onClick={() => setChangeMode(null)}>Cancel</button>
+            </div>
+          </form>
+        )}
+        
+        {msg.text && (
+          <div style={{ marginTop: 12, fontSize: 13, color: msg.type === 'success' ? 'var(--accent-green)' : '#ff4444' }}>
+            {msg.text}
+          </div>
+        )}
+      </div>
+
       {!profile ? (
-        <div style={{ color: 'var(--text2)', padding: '24px 0', fontSize: 13 }}>Loading workspace history...</div>
+        <div style={{ color: 'var(--text2)', padding: '24px 0', fontSize: 13, marginTop: 24 }}>Loading workspace history...</div>
       ) : (
-        <>
+        <div style={{ marginTop: 24 }}>
           <RoomList title="Rooms I Created (Admin)" icon={<Shield size={16} />} rooms={profile.roomsCreated} onEnter={onEnterRoom} />
           <RoomList title="Rooms I'm a Member Of" icon={<Users size={16} />} rooms={profile.roomsJoined} onEnter={onEnterRoom} />
-        </>
+        </div>
       )}
     </div>
   );

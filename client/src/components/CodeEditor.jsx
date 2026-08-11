@@ -1,4 +1,6 @@
 import React, { useEffect, useRef } from 'react';
+
+import { yCollab } from 'y-codemirror.next';
 import { EditorView, keymap, lineNumbers, highlightActiveLine,
          highlightActiveLineGutter, drawSelection, dropCursor,
          rectangularSelection, crosshairCursor } from '@codemirror/view';
@@ -15,7 +17,6 @@ import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
 import { cpp } from '@codemirror/lang-cpp';
 import { rust } from '@codemirror/lang-rust';
-import { oneDark } from '@codemirror/theme-one-dark';
 
 function getLang(language) {
   const l = (language || '').toLowerCase();
@@ -35,12 +36,14 @@ function getLang(language) {
  * CodeMirror 6 editor component.
  *
  * Props:
- *   content    — controlled text content
+ *   content    — controlled text content (used if ytext is not provided)
+ *   ytext      — Y.Text instance for collaborative editing
+ *   awareness  — Yjs awareness instance for remote cursors
  *   language   — syntax language string
- *   onChange   — called with new text when user edits
+ *   onChange   — called with new text when user edits (if not using ytext)
  *   readOnly   — boolean, disables editing
  */
-export default function CodeEditor({ content, language, onChange, readOnly }) {
+export default function CodeEditor({ content, ytext, awareness, language, onChange, readOnly }) {
   const containerRef = useRef(null);
   const viewRef      = useRef(null);
 
@@ -50,7 +53,7 @@ export default function CodeEditor({ content, language, onChange, readOnly }) {
 
     const view = new EditorView({
       state: EditorState.create({
-        doc: content || '',
+        doc: ytext ? ytext.toString() : (content || ''),
         extensions: [
           // Line numbers and gutter
           lineNumbers(),
@@ -81,8 +84,6 @@ export default function CodeEditor({ content, language, onChange, readOnly }) {
           getLang(language),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 
-          // Theme
-          oneDark,
 
           // Keymaps (order matters — more specific first)
           keymap.of([
@@ -113,35 +114,38 @@ export default function CodeEditor({ content, language, onChange, readOnly }) {
             },
             '.cm-content': { padding: '8px 0', minHeight: '100%' },
             '.cm-gutters': {
-              background: '#0d1117',
-              borderRight: '1px solid #21262d',
-              color: '#484f58',
+              background: 'var(--bg1)',
+              borderRight: '1px solid var(--line)',
+              color: 'var(--text1)',
               minWidth: '48px',
             },
-            '.cm-activeLineGutter': { background: '#161b22' },
-            '.cm-activeLine': { background: '#161b22' },
-            '.cm-cursor': { borderLeftColor: '#58a6ff' },
-            '.cm-selectionBackground': { background: '#264f78 !important' },
-            '.cm-focused .cm-selectionBackground': { background: '#264f78 !important' },
-            '.cm-matchingBracket': { outline: '1px solid #58a6ff', borderRadius: '2px' },
-            '.cm-tooltip': { background: '#1c2128', border: '1px solid #30363d', borderRadius: '6px' },
-            '.cm-tooltip-autocomplete ul': { fontFamily: 'inherit', fontSize: '13px' },
+            '.cm-activeLineGutter': { background: 'var(--bg3)', color: 'var(--text0)' },
+            '.cm-activeLine': { background: 'var(--bg2)' },
+            '.cm-cursor': { borderLeftColor: 'var(--accent)' },
+            '.cm-selectionBackground': { background: 'rgba(92, 158, 25, 0.2) !important' },
+            '.cm-focused .cm-selectionBackground': { background: 'rgba(92, 158, 25, 0.2) !important' },
+            '.cm-matchingBracket': { outline: '1px solid var(--accent)', borderRadius: '2px', background: 'rgba(92, 158, 25, 0.1)' },
+            '.cm-tooltip': { background: 'var(--bg1)', border: '1px solid var(--line)', borderRadius: '6px' },
+            '.cm-tooltip-autocomplete ul': { fontFamily: 'inherit', fontSize: '13px', color: 'var(--text0)' },
             '.cm-completionIcon': { paddingRight: '6px' },
             // Search panel
-            '.cm-search': { padding: '8px 12px', background: '#161b22', borderTop: '1px solid #30363d' },
+            '.cm-search': { padding: '8px 12px', background: 'var(--bg1)', borderTop: '1px solid var(--line)' },
             '.cm-textfield': {
-              background: '#0d1117', color: '#c9d1d9', border: '1px solid #30363d',
+              background: 'var(--bg0)', color: 'var(--text0)', border: '1px solid var(--line2)',
               borderRadius: '4px', padding: '4px 8px', fontSize: '13px',
             },
             '.cm-button': {
-              background: '#21262d', color: '#c9d1d9', border: '1px solid #30363d',
+              background: 'var(--bg3)', color: 'var(--text0)', border: '1px solid var(--line2)',
               borderRadius: '4px', padding: '4px 10px', cursor: 'pointer',
             },
           }),
 
-          // Notify parent of changes
+          // Yjs Collaborative Editing
+          ytext ? yCollab(ytext, awareness) : [],
+
+          // Notify parent of changes (if not using yjs)
           EditorView.updateListener.of((update) => {
-            if (update.docChanged && onChange) {
+            if (!ytext && update.docChanged && onChange) {
               onChange(update.state.doc.toString());
             }
           }),
@@ -153,10 +157,11 @@ export default function CodeEditor({ content, language, onChange, readOnly }) {
     viewRef.current = view;
     return () => view.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language]);
+  }, [language, ytext]);
 
-  // Sync content from outside (remote edits) without recreating the view
+  // Sync content from outside (remote edits) without recreating the view (ONLY if not using yjs)
   useEffect(() => {
+    if (ytext) return; // Yjs handles its own synchronization
     const view = viewRef.current;
     if (!view) return;
     const current = view.state.doc.toString();
@@ -167,7 +172,7 @@ export default function CodeEditor({ content, language, onChange, readOnly }) {
         selection: view.state.selection,
       });
     }
-  }, [content]);
+  }, [content, ytext]);
 
   return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
 }

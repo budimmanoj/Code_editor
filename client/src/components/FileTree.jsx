@@ -8,7 +8,7 @@ function FileIcon({ node }) {
 }
 
 function TreeNode({
-  node, depth, selectedId,
+  node, depth, selectedId, pendingIds,
   onSelect, onAddFile, onAddFolder, onDelete, onRename,
   isRoot,
 }) {
@@ -20,6 +20,7 @@ function TreeNode({
   const renameInputRef = useRef(null);
   const isFolder = node.fileType === 'FOLDER';
   const isSelected = node.id === selectedId;
+  const isPending = pendingIds?.has(node.id);
   const isVirtualRoot = node.id === null && node.name === '__root__';
 
   // Focus rename input when opened
@@ -47,6 +48,7 @@ function TreeNode({
             node={child}
             depth={0}
             selectedId={selectedId}
+            pendingIds={pendingIds}
             onSelect={onSelect}
             onAddFile={onAddFile}
             onAddFolder={onAddFolder}
@@ -80,7 +82,7 @@ function TreeNode({
         onClick={() => {
           if (renaming) return;
           if (isFolder) setOpen(!open);
-          else onSelect(node);
+          onSelect(node);
         }}
       >
         {isFolder && (
@@ -107,7 +109,10 @@ function TreeNode({
             e.stopPropagation();
             setRenamVal(node.name);
             setRenaming(true);
-          }}>{node.name}</span>
+          }}>
+            {node.name}
+            {isPending && <span style={{ marginLeft: 6, color: '#f97316', fontSize: 10, fontWeight: 'bold' }}>●</span>}
+          </span>
         )}
 
         {!renaming && (
@@ -148,6 +153,7 @@ function TreeNode({
           node={child}
           depth={depth + 1}
           selectedId={selectedId}
+          pendingIds={pendingIds}
           onSelect={onSelect}
           onAddFile={onAddFile}
           onAddFolder={onAddFolder}
@@ -160,7 +166,7 @@ function TreeNode({
 }
 
 export default function FileTree({
-  tree, selectedId,
+  tree, selectedId, pendingIds,
   onSelect, onAddFile, onAddFolder, onDelete, onRename,
 }) {
   if (!tree) return (
@@ -183,6 +189,7 @@ export default function FileTree({
         node={tree}
         depth={0}
         selectedId={selectedId}
+        pendingIds={pendingIds}
         onSelect={onSelect}
         onAddFile={onAddFile}
         onAddFolder={onAddFolder}

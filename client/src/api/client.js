@@ -50,7 +50,29 @@ async function req(method, path, body) {
 export const api = {
   // Auth
   register: (dto)         => req('POST', '/users/register', dto),
+  verifyRegistration: (dto) => req('POST', '/users/register/verify', dto),
+  resendRegistrationOtp: (email) => req('POST', '/users/register/resend', { email }),
   login:    (email, pass) => req('POST', '/users/login', { email, password: pass }),
+  
+  forgotPassword: (email) => req('POST', '/users/forgot-password', { email }),
+  verifyForgotPasswordOtp: (dto) => req('POST', '/users/forgot-password/verify', dto),
+  
+  // Custom req with reset token header for resetPassword
+  resetPassword: async (token, dto) => {
+    const res = await fetch(`${BASE}/users/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(dto)
+    });
+    const data = await (res.headers.get('content-type')?.includes('application/json') ? res.json() : res.text());
+    if (!res.ok) throw new Error(data.error || data.message || 'Request failed');
+    return data;
+  },
+
+  changePassword: (dto) => req('POST', '/users/change-password', dto),
+  sendChangePasswordOtp: () => req('POST', '/users/change-password/send-otp', {}),
+  changePasswordWithOtp: (dto) => req('POST', '/users/change-password/verify-otp', dto),
+
   getMyProfile: ()        => req('GET',  '/users/me'),
 
   // Rooms
@@ -67,8 +89,13 @@ export const api = {
   renameFileNode:      (roomId, fileNodeId, name)    => req('PATCH',  `/workspace/${roomId}/fileNode/${fileNodeId}/rename`, { name }),
 
   // Code & Versions
-  updateCode:          (dto)                            => req('PUT',  '/code/update', dto),
+  updateCode:          (roomId, fileNodeId, content)    => req('POST', `/code/update`, { roomId, fileNodeId, content }),
   getFileVersions:     (roomId, fileNodeId)             => req('GET',  `/code/versions/${roomId}/${fileNodeId}`),
+  getRoomVersions:     (roomId)                         => req('GET',  `/code/versions/room/${roomId}`),
+  getHistory:          (roomId, scopeType, scopeId)     => req('GET',  `/code/history/${roomId}?scopeType=${scopeType}&scopeId=${scopeId}`),
+  getPendingVersions:  (roomId)                         => req('GET',  `/code/pending/${roomId}`),
+  approveVersion:      (roomId, versionId)              => req('PUT',  `/code/versions/${roomId}/${versionId}/approve`),
+  rejectVersion:       (roomId, versionId, comment)     => req('POST', `/code/versions/${roomId}/${versionId}/reject`, { comment }),
   updateVersionStatus: (roomId, versionId, status)      => req('PUT',  `/code/versions/${roomId}/${versionId}/status?status=${status}`),
   revertToVersion:     (roomId, fileNodeId, versionId)  => req('POST', `/code/versions/${roomId}/${fileNodeId}/revert/${versionId}`, {}),
 
@@ -76,4 +103,7 @@ export const api = {
   // Valid actions: review, explain, refactor, debug, generate, tests,
   //   commit-message, security, optimize, docs, chat, review-before-commit
   aiCall: (action, dto) => req('POST', `/ai/${action}`, dto),
+
+  // AI Workspace Action — execute a confirmed AI action (CREATE_FILE, UPDATE_FILE)
+  aiWorkspaceAction: (action, roomId) => req('POST', '/ai/workspace-action', { action, roomId }),
 };

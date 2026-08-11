@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+dist/
+build/
+target/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.classpath
+.project
+.settings/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite
+
+# Credentials / Secrets
+.env
+.env.local
+.env.*.local
+application-secret.properties
+
+# Prompt & Temp Files
+prompt.md
+*.md.backup
