@@ -36,3 +36,4 @@ application-secret.properties
 # Prompt & Temp Files
 prompt.md
 *.md.backup
+.env
