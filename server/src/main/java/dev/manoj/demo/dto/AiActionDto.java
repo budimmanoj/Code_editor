@@ -1,6 +1,6 @@
 package dev.manoj.demo.dto;
 
-import java.util.List;
+
 
 /**
  * Represents a structured action the AI wants to perform.
@@ -28,6 +28,9 @@ public class AiActionDto {
     // ── UPDATE_FILE fields ────────────────────────────────────────────────────
     /** ID of the file to update (frontend validates this belongs to the room) */
     private String fileId;
+
+    /** The expected version of the file, used to prevent race condition overwrites */
+    private Integer expectedVersion;
 
     /** Human-readable file name shown in the diff card */
     private String fileNameForDisplay;
@@ -62,4 +65,7 @@ public class AiActionDto {
 
     public String getNewContent() { return newContent; }
     public void setNewContent(String newContent) { this.newContent = newContent; }
+
+    public Integer getExpectedVersion() { return expectedVersion; }
+    public void setExpectedVersion(Integer expectedVersion) { this.expectedVersion = expectedVersion; }
 }

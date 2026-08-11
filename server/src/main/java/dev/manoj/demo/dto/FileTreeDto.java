@@ -11,6 +11,7 @@ public class FileTreeDto {
     private String name;
     private FileType fileType;
     private String language;
+    private Integer version;
     private List<FileTreeDto> children = new ArrayList<>();  // initialized — avoids NPE in addChild
 
     public UUID getId() { return id; }
@@ -24,6 +25,9 @@ public class FileTreeDto {
 
     public String getLanguage() { return language; }
     public void setLanguage(String language) { this.language = language; }
+
+    public Integer getVersion() { return version; }
+    public void setVersion(Integer version) { this.version = version; }
 
     public List<FileTreeDto> getChildren() { return children; }
     public void setChildren(List<FileTreeDto> children) { this.children = children; }

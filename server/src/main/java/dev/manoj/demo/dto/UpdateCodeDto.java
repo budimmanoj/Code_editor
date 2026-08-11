@@ -8,6 +8,7 @@ public class UpdateCodeDto {
     private UUID fileNodeId;
     private UUID userId;
     private String content;
+    private Integer expectedVersion;
 
     public UUID getRoomId() { return roomId; }
     public void setRoomId(UUID roomId) { this.roomId = roomId; }
@@ -20,4 +21,7 @@ public class UpdateCodeDto {
 
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+
+    public Integer getExpectedVersion() { return expectedVersion; }
+    public void setExpectedVersion(Integer expectedVersion) { this.expectedVersion = expectedVersion; }
 }

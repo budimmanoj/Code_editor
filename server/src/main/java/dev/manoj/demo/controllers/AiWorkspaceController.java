@@ -22,14 +22,19 @@ import java.util.UUID;
  *
  * Security: All IDs are re-validated server-side regardless of what the AI returned.
  */
+import dev.manoj.demo.websocket.RoomWebSocketHandler;
+
+
 @RestController
 @RequestMapping("/api/ai/workspace-action")
 public class AiWorkspaceController {
 
     private final WorkSpaceService workSpaceService;
+    private final RoomWebSocketHandler wsHandler;
 
-    public AiWorkspaceController(WorkSpaceService workSpaceService) {
+    public AiWorkspaceController(WorkSpaceService workSpaceService, RoomWebSocketHandler wsHandler) {
         this.workSpaceService = workSpaceService;
+        this.wsHandler = wsHandler;
     }
 
     /**
@@ -57,11 +62,17 @@ public class AiWorkspaceController {
             return ResponseEntity.badRequest().body(Map.of("error", "Action type is required"));
         }
 
-        return switch (action.getType()) {
-            case "CREATE_FILE" -> handleCreateFile(action, roomId, userId);
-            case "UPDATE_FILE" -> handleUpdateFile(action, roomId, userId);
-            default -> ResponseEntity.badRequest().body(Map.of("error", "Unknown action type: " + action.getType()));
-        };
+        try {
+            return switch (action.getType()) {
+                case "CREATE_FILE" -> handleCreateFile(action, roomId, userId);
+                case "UPDATE_FILE" -> handleUpdateFile(action, roomId, userId);
+                default -> ResponseEntity.badRequest().body(Map.of("error", "Unknown action type: " + action.getType()));
+            };
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
     }
 
     private ResponseEntity<Map<String, Object>> handleCreateFile(AiActionDto action, UUID roomId, UUID userId) {
@@ -97,6 +108,16 @@ public class AiWorkspaceController {
             workSpaceService.updateCode(updateDto);
         }
 
+        // Broadcast creation to the room
+        wsHandler.broadcastToRoom(roomId.toString(), null, Map.of(
+            "type", "FILE_CREATED",
+            "fileId", created.getId().toString(),
+            "fileName", created.getName(),
+            "parentFolderId", action.getParentFolderId() != null ? action.getParentFolderId() : "",
+            "language", action.getLanguage() != null ? action.getLanguage() : "",
+            "fileType", "FILE"
+        ));
+
         return ResponseEntity.ok(Map.of(
             "fileId", created.getId().toString(),
             "fileName", created.getName(),
@@ -126,7 +147,24 @@ public class AiWorkspaceController {
         updateDto.setUserId(userId);
         updateDto.setContent(action.getNewContent());
 
+        updateDto.setExpectedVersion(action.getExpectedVersion());
+
         String result = workSpaceService.updateCode(updateDto);
+
+        // Only broadcast if the AI update was applied immediately to the canonical file (admin)
+        // Non-admins just create a PENDING version for review, so we shouldn't force-sync the room.
+        if (!result.contains("review")) {
+            // Clear any stale Yjs buffers so they don't overwrite the AI's canonical change
+            wsHandler.clearYjsBuffer(fileNodeId.toString());
+
+            // Broadcast to the room so all editors apply the new content
+            wsHandler.broadcastToRoom(roomId.toString(), null, Map.of(
+                "type", "CODE_UPDATE",
+                "fileId", fileNodeId.toString(),
+                "content", action.getNewContent(),
+                "source", "AI"
+            ));
+        }
 
         return ResponseEntity.ok(Map.of(
             "fileId", fileNodeId.toString(),

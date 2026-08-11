@@ -15,6 +15,9 @@ public class FileNode {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @Version
+    private Integer version = 0;
+
     @Column(nullable = false)
     private String name;
 
@@ -57,6 +60,14 @@ public class FileNode {
 
     public void setId(UUID id) {
         this.id = id;
+    }
+
+    public Integer getVersion() {
+        return version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version;
     }
 
     public String getName() {

@@ -295,8 +295,32 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       });
     });
 
-    // CODE_UPDATE is deprecated in favor of Yjs sync
+    socket.on('FILE_CREATED', (msg) => {
+      // Reload the file tree so the new file appears for all collaborators
+      loadTree();
+    });
 
+    socket.on('CODE_UPDATE', (msg) => {
+      if (msg.source === 'AI') {
+        // Reload tree to bump the version number in the frontend state
+        loadTree();
+        if (activeFileRef.current && activeFileRef.current.id === msg.fileId) {
+          setCode(msg.content);
+          setSavedCode(msg.content);
+
+          // Force recreate YjsProvider to apply remote changes without broadcasting YJS_UPDATE
+          setYjsProvider(prev => {
+            if (prev) {
+              const wsSendFn = prev.wsSendFn;
+              const myColor = prev.awareness.getLocalState()?.user?.color || '#58a6ff';
+              prev.destroy();
+              return new CodeRoomYjsProvider(wsSendFn, roomId, msg.fileId, user.username || user.email, myColor, msg.content);
+            }
+            return prev;
+          });
+        }
+      }
+    });
     // Admin approved a version — do NOT overwrite the collaborative editor content!
     socket.on('REVISION_APPROVED', (msg) => {
       if (activeFileRef.current && activeFileRef.current.id === msg.fileId) {
@@ -336,7 +360,30 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   // ── Data loaders ───────────────────────────────────────────────────────────
 
   const loadTree = useCallback(async () => {
-    try { setTree(await api.getFileTree(roomId)); } catch { setTree(null); }
+    try {
+      const newTree = await api.getFileTree(roomId);
+      setTree(newTree);
+      
+      // Keep activeFile's version in sync with the new tree
+      setActiveFile(prev => {
+        if (!prev) return prev;
+        const findNode = (nodes) => {
+          for (let n of nodes) {
+            if (n.id === prev.id) return n;
+            if (n.children) {
+              const res = findNode(n.children);
+              if (res) return res;
+            }
+          }
+          return null;
+        };
+        const updatedNode = findNode([newTree]);
+        if (updatedNode && updatedNode.version !== prev.version) {
+          return { ...prev, version: updatedNode.version };
+        }
+        return prev;
+      });
+    } catch { setTree(null); }
   }, [roomId]);
 
   const loadParticipants = useCallback(async () => {
@@ -1451,10 +1498,11 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
             <div className="drag-handle" onPointerDown={startAiDrag} />
             <AiPanel
               code={code}
-              language={activeFile?.language || 'plaintext'}
-              filename={activeFile?.name || ''}
+              language={activeFile ? activeFile.language : 'plaintext'}
+              filename={activeFile ? activeFile.name : ''}
               roomId={roomId}
-              fileNodeId={activeFile?.id}
+              fileNodeId={activeFile ? activeFile.id : undefined}
+              activeFileVersion={activeFile ? activeFile.version : undefined}
               tree={tree}
               onInsertCode={handleInsertAiCode}
               onClose={() => setShowAiPanel(false)}

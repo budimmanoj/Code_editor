@@ -110,6 +110,12 @@ public class WorkSpaceService {
 
         String safeContent = sanitizeContent(dto.getContent());
 
+        if (dto.getExpectedVersion() != null) {
+            if (!dto.getExpectedVersion().equals(fileNode.getVersion())) {
+                throw new IllegalStateException("Version conflict: The file has changed. Please regenerate the AI proposal.");
+            }
+        }
+
         User user = userRepository.findById(dto.getUserId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -300,22 +306,36 @@ public class WorkSpaceService {
 
             // Notify all connected clients in this room that the official
             // file content has changed so they can refresh their editors
-            wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
-                "type",       "REVISION_APPROVED",
-                "fileId",     fileNode.getId().toString(),
-                "content",    approvedContent != null ? approvedContent : "",
-                "approvedBy", reviewerName,
-                "versionId",  versionId.toString()
-            ));
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
+                            "type",       "REVISION_APPROVED",
+                            "fileId",     fileNode.getId().toString(),
+                            "content",    approvedContent != null ? approvedContent : "",
+                            "approvedBy", reviewerName,
+                            "versionId",  versionId.toString()
+                        ));
+                    }
+                }
+            );
 
         } else if (status == CodeReviewStatus.REJECTED) {
             // Rejection: fileNode.content stays as-is (the last approved version)
-            wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
-                "type",      "REVISION_REJECTED",
-                "fileId",    fileNode.getId().toString(),
-                "versionId", versionId.toString(),
-                "reason",    reviewComment != null ? reviewComment : ""
-            ));
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
+                            "type",      "REVISION_REJECTED",
+                            "fileId",    fileNode.getId().toString(),
+                            "versionId", versionId.toString(),
+                            "reason",    reviewComment != null ? reviewComment : ""
+                        ));
+                    }
+                }
+            );
 
         } else if (status == CodeReviewStatus.NO_CHANGE) {
             // Legacy: revert to previous approved version
@@ -428,6 +448,7 @@ public class WorkSpaceService {
             dto.setName(node.getName());
             dto.setFileType(node.getType());
             dto.setLanguage(node.getLanguage());
+            dto.setVersion(node.getVersion());
             dtoMap.put(node.getId(), dto);
         }
 

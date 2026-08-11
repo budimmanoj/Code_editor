@@ -225,7 +225,11 @@ public class RoomWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private void broadcastToRoom(String roomId, String excludeSessionId, Object data) {
+    public void clearYjsBuffer(String fileId) {
+        yjsFileBuffers.remove(fileId);
+    }
+
+    public void broadcastToRoom(String roomId, String excludeSessionId, Object data) {
         Set<WebSocketSession> sessions = roomSessions.getOrDefault(roomId, Collections.emptySet());
         if (sessions.isEmpty()) return;
 

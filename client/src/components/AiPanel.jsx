@@ -179,7 +179,7 @@ function ContextPill({ filename, language, mentionedFiles }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function AiPanel({
-  code, language, filename, roomId, fileNodeId,
+  code, language, filename, roomId, fileNodeId, activeFileVersion,
   tree,                     // FileTreeDto from EditorPage
   onInsertCode, onClose,
   onFileCreated,            // callback(fileId, fileName) after AI creates a file
@@ -422,13 +422,16 @@ export default function AiPanel({
                   />
                 ) : msg.action.type === 'UPDATE_FILE' ? (
                   <UpdateFileCard
-                    action={msg.action}
+                    key={idx}
+                    action={{ ...msg.action, expectedVersion: activeFileVersion }}
                     currentCode={code}
                     roomId={roomId}
                     onConfirm={(result, newContent) => {
                       if (onCodeUpdated) onCodeUpdated(msg.action.fileId, newContent);
                     }}
-                    onCancel={() => {}}
+                    onCancel={() => {
+                      setHistory(prev => prev.filter((_, i) => i !== idx));
+                    }}
                     onInsertCode={onInsertCode}
                   />
                 ) : (

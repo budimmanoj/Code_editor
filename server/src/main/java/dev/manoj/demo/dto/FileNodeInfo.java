@@ -16,4 +16,5 @@ public interface FileNodeInfo {
     FileType getType();
     String getLanguage();
     UUID getParentId();  // maps to parent.id via JPQL alias
+    Integer getVersion();
 }

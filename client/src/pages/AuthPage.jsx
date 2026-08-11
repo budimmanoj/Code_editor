@@ -84,7 +84,15 @@ export default function AuthPage({ onLogin }) {
         switchView('login');
       }
     } catch (err) {
-      setError(err.message);
+      if (view === 'login' && err.message.toLowerCase().includes("not found")) {
+        setError("You are a new account, so register first!");
+        setTimeout(() => switchView('register'), 1500);
+      } else if (view === 'register' && err.message.toLowerCase().includes("already")) {
+        setError("You are already a user, go for login!");
+        setTimeout(() => switchView('login'), 1500);
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -200,7 +208,7 @@ export default function AuthPage({ onLogin }) {
               <div style={{display: 'flex', justifyContent: 'space-between'}}>
                 <label className="label">Password</label>
                 {view === 'login' && (
-                  <button type="button" className="forgot-link" onClick={() => switchView('forgot-password')}>
+                  <button type="button" className="inline-link" onClick={() => switchView('forgot-password')}>
                     Forgot password?
                   </button>
                 )}
@@ -257,7 +265,7 @@ export default function AuthPage({ onLogin }) {
           <div className="resend-container" style={{marginTop: '16px', textAlign: 'center'}}>
             <button 
               type="button" 
-              className="forgot-link" 
+              className="inline-link" 
               disabled={countdown > 0 || loading}
               onClick={handleResendOtp}
             >
@@ -268,8 +276,26 @@ export default function AuthPage({ onLogin }) {
 
         {(view === 'forgot-password' || view === 'forgot-verify-otp' || view === 'reset-password') && (
           <div style={{marginTop: '16px', textAlign: 'center'}}>
-            <button type="button" className="forgot-link" onClick={() => switchView('login')}>
+            <button type="button" className="inline-link" onClick={() => switchView('login')}>
               Back to Login
+            </button>
+          </div>
+        )}
+
+        {view === 'login' && (
+          <div style={{marginTop: '16px', textAlign: 'center', fontSize: '14px', color: 'var(--text-secondary)'}}>
+            New user?{' '}
+            <button type="button" className="inline-link" onClick={() => switchView('register')}>
+              Create an account
+            </button>
+          </div>
+        )}
+
+        {view === 'register' && (
+          <div style={{marginTop: '16px', textAlign: 'center', fontSize: '14px', color: 'var(--text-secondary)'}}>
+            Already have an account?{' '}
+            <button type="button" className="inline-link" onClick={() => switchView('login')}>
+              Sign in
             </button>
           </div>
         )}

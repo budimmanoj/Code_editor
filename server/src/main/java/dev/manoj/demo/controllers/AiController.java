@@ -126,7 +126,6 @@ public class AiController {
             String resolved = resolveCode(dto, auth);
             dto.setCode(resolved);
         }
-        String message = dto.getMessage() != null ? dto.getMessage() : "";
 
         // Use workspace-aware chat for rich context
         String rawResponse = aiService.workspaceChat(dto);

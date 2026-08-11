@@ -288,3 +288,20 @@
   background: #5C9E19;
   color: var(--text0);
 }
+
+.inline-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: #5C9E19;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline;
+}
+.inline-link:hover {
+  text-decoration: underline;
+  color: var(--accent-green, #10b981);
+}

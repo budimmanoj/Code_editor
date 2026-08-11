@@ -161,7 +161,7 @@ public class UserService {
     public AuthResponseDto login(String email, String password) {
         String normalized = normalizeEmail(email);
         User user = userRepository.findByEmail(normalized)
-                .orElseThrow(() -> new RuntimeException("Invalid credentials"));
+                .orElseThrow(() -> new RuntimeException("User not found"));
         
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
             throw new RuntimeException("Invalid credentials");

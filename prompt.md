@@ -1,767 +1,637 @@
-You are working on my existing CodeRoom project, a real-time collaborative code workspace.
+# CodeRoom — FINAL Production Synchronization Test
 
-IMPORTANT:
-Do NOT rebuild the project or replace existing functionality.
-Do NOT create a separate file-management system for the AI.
-Use the existing CodeRoom workspace, file/folder APIs, database, WebSocket architecture, editor state, authentication, and version-history system.
+The synchronization architecture is COMPLETE.
 
-GOAL:
-Transform the current AI Assistant from an independent chatbot into a workspace-aware coding assistant that can understand the CodeRoom project and safely read/create/update files.
+**This is the final verification pass.**
 
-CURRENT PROBLEM:
-The AI Assistant currently works independently from the code editor.
+Do NOT redesign, refactor, or add new synchronization mechanisms.
 
-For example:
+Do NOT make speculative changes.
 
-User has:
-    code.js
+Only fix a bug if you can reproduce or clearly prove it from the code.
 
-with actual code inside the editor.
+The required architecture is:
 
-User asks:
-    "What code is present in code.js?"
+```text
+HUMAN EDIT
+→ Yjs
+→ WebSocket
+→ collaborators in same room
 
-The AI currently responds:
-    "I don't have direct access to your local workspace or file system."
+AI EDIT
+→ AI proposal
+→ user/admin approval
+→ version validation
+→ database transaction
+→ COMMIT
+→ afterCommit()
+→ WebSocket broadcast
+→ collaborators
+```
 
-This behavior must be eliminated.
+---
 
-The AI should understand the CodeRoom workspace through controlled application context and APIs.
+# 1. Human Realtime Editing
 
-==================================================
-1. FIRST: STUDY THE EXISTING CODEBASE
-==================================================
+Open the same room and same file in **3 browser windows/users**.
 
-Before changing anything, inspect the entire relevant architecture.
-
-Identify:
-
-FRONTEND:
-- EditorPage
-- AiPanel
-- CodeMirror/editor component
-- workspace/file explorer
-- active file state
-- file loading logic
-- file creation/update/delete APIs
-- WebSocket logic
-- authentication
-- current AI API client
-
-BACKEND:
-- AI controller
-- AI service / ModelService
-- file controllers/services
-- folder/project/room services
-- repositories
-- entities
-- WebSocket handlers
-- authentication/JWT
-- version history
-- database schema
-
-Understand how the currently opened file is represented and where its latest content comes from.
-
-DO NOT assume the architecture.
-Inspect the actual code and reuse the existing implementation.
-
-==================================================
-2. DESIGN A WORKSPACE-AWARE AI CONTEXT
-==================================================
-
-The AI request should contain enough context for the model to understand what the user is currently working on.
-
-At minimum support:
-
-- room/project ID
-- active file ID
-- active file name
-- active file path
-- programming language
-- current file content
-- current cursor/selection if useful
-- workspace tree
-
-Example:
-
-{
-  "message": "What code is present in code.js?",
-  "roomId": "...",
-  "activeFile": {
-      "id": "...",
-      "name": "code.js",
-      "path": "/src/code.js",
-      "language": "javascript",
-      "content": "..."
-  },
-  "workspace": {
-      "tree": [...]
-  }
-}
-
-Do NOT blindly send the entire workspace on every request.
-
-Design the context efficiently.
-
-==================================================
-3. CONTEXT STRATEGY
-==================================================
-
-Implement context levels.
-
-LEVEL 1 — CURRENT FILE
-
-For questions about the currently open file, send only:
-
-- current file metadata
-- current file content
-- relevant selection/cursor
-
-Example:
-
-"What does this function do?"
-
-→ send the relevant current file context.
-
-LEVEL 2 — SELECTED FILES
-
-Allow the user to explicitly reference files.
-
-Example:
-
-"Compare code.js and utils.js."
-
-Only send those files.
-
-LEVEL 3 — FOLDER
-
-Allow AI to inspect files inside a selected folder.
-
-Example:
-
-"Find bugs in the authentication folder."
-
-Retrieve only relevant files from that folder.
-
-LEVEL 4 — WORKSPACE
-
-For questions requiring project-wide understanding:
-
-"Why is authentication failing?"
-
-Allow the AI to inspect the workspace structure and retrieve relevant files.
-
-Do NOT send huge workspaces blindly.
-
-Use a context budget/token limit and retrieve only relevant files.
-
-==================================================
-4. AI TOOL / ACTION ARCHITECTURE
-==================================================
-
-The AI should not directly manipulate the database.
-
-Create a controlled application-level tool/action system.
-
-Support actions such as:
-
-READ_FILE
-LIST_FILES
-READ_FOLDER
-CREATE_FILE
-UPDATE_FILE
-DELETE_FILE
-RENAME_FILE
-CREATE_FOLDER
-
-The AI should request actions through structured JSON.
-
-Example:
-
-{
-  "action": "READ_FILE",
-  "fileId": "123"
-}
-
-For creation:
-
-{
-  "action": "CREATE_FILE",
-  "parentFolderId": "456",
-  "fileName": "sum.cpp",
-  "language": "cpp",
-  "content": "..."
-}
-
-For updating:
-
-{
-  "action": "UPDATE_FILE",
-  "fileId": "123",
-  "content": "..."
-}
-
-The backend must validate every action.
-
-The AI must NEVER receive unrestricted database access.
-
-==================================================
-5. FILE CREATION
-==================================================
-
-If the user says:
-
-"Create a C++ file that calculates the sum of N numbers."
-
-The AI should not merely return code in chat.
-
-It should generate a structured CREATE_FILE action.
-
-Frontend should display:
-
-AI wants to create:
-
-sum.cpp
-
-[code preview]
-
-[Create File] [Cancel]
-
-Only after user confirmation should the frontend/backend execute the action.
-
-After creation:
-
-- update workspace explorer
-- persist file in PostgreSQL
-- open the newly created file in the editor
-- synchronize through existing WebSocket mechanisms if required
-- maintain version history where appropriate
-
-==================================================
-6. FILE MODIFICATION
-==================================================
-
-If user says:
-
-"Add error handling to code.js."
-
-Do NOT blindly overwrite the file.
-
-AI should generate a proposed change.
-
-Prefer a diff-based approach:
-
-{
-  "action": "UPDATE_FILE",
-  "fileId": "...",
-  "changes": [
-      {
-          "startLine": 10,
-          "endLine": 15,
-          "replacement": "..."
-      }
-  ]
-}
-
-Frontend should show:
-
-AI proposed changes to code.js
-
-[diff viewer]
-
-[Apply Changes] [Reject]
-
-Only Apply Changes modifies the actual file.
-
-==================================================
-7. VERSION HISTORY
-==================================================
-
-Integrate AI modifications with the existing CodeRoom version-history system.
-
-Every AI modification should be traceable.
-
-Example:
-
-Version 17
-    ↓
-AI modification
-    ↓
-Version 18
-
-User must be able to revert AI-generated changes using the existing version-history mechanism.
-
-Do NOT create a second version-history system.
-
-==================================================
-8. CHAT COMMANDS / MENTIONS
-==================================================
-
-Integrate with the existing @ mention system.
-
-Support concepts such as:
-
-@file
-@folder
-@workspace
-
-Examples:
-
-@file code.js explain this
-
-@file utils.js review this
-
-@folder auth find security problems
-
-@workspace explain the authentication architecture
-
-If the existing mention UI already exists, improve/integrate it instead of replacing it.
-
-The mention dropdown must not overlap the chat input or Chat button.
-
-==================================================
-9. CURRENT FILE MUST ALWAYS BE AVAILABLE
-==================================================
-
-When the user opens:
-
-code.js
-
-the AI should know that:
-
-ACTIVE FILE = code.js
-
-If the user switches to:
-
-hello.js
-
-the AI context must automatically become:
-
-ACTIVE FILE = hello.js
-
-If the user asks:
-
-"What code is present in this file?"
-
-the AI should receive the currently active file content.
-
-Do NOT hardcode file names.
-
-==================================================
-10. HANDLE EDITOR STATE CORRECTLY
-==================================================
-
-Important:
-
-The editor may contain unsaved changes.
-
-The AI should preferably receive the latest editor state rather than stale database content.
-
-Design the frontend so that:
-
-Editor state
-    ↓
-AI context
-
-and not necessarily:
-
-Database
-    ↓
-AI context
-
-If the file has unsaved changes, AI should see the latest content.
-
-After an AI modification, update:
-
-Editor
-Database
-WebSocket collaboration state
-Version history
-
-consistently.
-
-==================================================
-11. SECURITY
-==================================================
-
-Never trust AI-generated file IDs, paths, folder IDs, or room IDs.
-
-Backend must verify:
-
-- authenticated user
-- room membership
-- file belongs to room
-- folder belongs to room
-- user has permission to modify the resource
-- requested operation is allowed
-
-Prevent:
-
-- path traversal
-- cross-room file access
-- unauthorized file modification
-- arbitrary database queries
-- arbitrary filesystem access
-
-The AI should only operate within the authenticated CodeRoom workspace.
-
-==================================================
-12. EFFICIENCY
-==================================================
-
-Do NOT send all files to Gemini on every message.
-
-Use:
-
-- active-file context
-- explicit file references
-- workspace tree
-- selective file retrieval
-- context/token limits
-- relevant-file retrieval
-
-For large projects, use a retrieval strategy.
-
-For example:
-
-User:
-"Why is login failing?"
-
-System:
-1. inspect workspace tree
-2. identify authentication-related files
-3. retrieve relevant files
-4. provide those files to the AI
-5. generate answer
-
-Do not send unrelated files such as:
-
-README
-images
-node_modules
-generated files
-build output
-etc.
-
-==================================================
-13. AI RESPONSE TYPES
-==================================================
-
-Design the backend response so it can distinguish between:
-
-TEXT_RESPONSE
-
-CODE_RESPONSE
-
-CREATE_FILE
-
-UPDATE_FILE
-
-DELETE_FILE
-
-RENAME_FILE
-
-CREATE_FOLDER
-
-READ_FILE
-
-etc.
-
-Example:
-
-{
-  "type": "TEXT_RESPONSE",
-  "message": "code.js currently contains..."
-}
-
-or:
-
-{
-  "type": "ACTION",
-  "action": {
-      "type": "CREATE_FILE",
-      "fileName": "sum.cpp",
-      "content": "..."
-  }
-}
-
-Do not force the frontend to parse natural-language AI responses to determine actions.
-
-==================================================
-14. EXISTING AI API
-==================================================
-
-Inspect the existing:
-
-POST /api/ai/chat
-
-Do not unnecessarily replace it.
-
-Extend it to support workspace context and structured actions.
-
-Maintain backward compatibility where practical.
-
-If a new endpoint is genuinely required, explain why before implementing it.
-
-==================================================
-15. GEMINI INTEGRATION
-==================================================
-
-Use the existing Gemini integration.
-
-Do not create another Gemini client if one already exists.
-
-Inspect the existing ModelService and configuration.
-
-Use the currently supported Gemini model and API format.
-
-Keep Gemini-specific logic isolated inside the AI service layer.
-
-The rest of CodeRoom should not depend directly on Gemini APIs.
-
-==================================================
-16. ERROR HANDLING
-==================================================
-
-Handle:
-
-- Gemini unavailable
-- invalid model
-- API timeout
-- rate limit
-- malformed AI action
-- file not found
-- permission denied
-- stale editor state
-- WebSocket synchronization failure
-
-The UI should show meaningful errors.
-
-Never expose API keys or internal backend details.
-
-==================================================
-17. UI/UX
-==================================================
-
-The AI should feel integrated into the editor.
-
-Example:
-
-User:
-"What code is in this file?"
-
-AI:
-"`code.js` currently contains a JavaScript function that..."
-
-User:
-"Create a function to calculate factorial."
-
-AI:
-"Here's the proposed change."
-
-[View Diff]
-
-[Apply]
-
-User:
-"Create a new file called factorial.cpp."
-
-AI:
-"Create `factorial.cpp`?"
-
-[Create File]
-
-The AI panel should visually distinguish:
-
-- normal answers
-- code blocks
-- file creation
-- file modifications
-- errors
-- action confirmations
-
-==================================================
-18. DO NOT BREAK EXISTING FEATURES
-==================================================
-
-Existing functionality must continue working:
-
-- authentication
-- rooms
-- collaboration
-- WebSockets
-- file explorer
-- folders
-- CodeMirror
-- file CRUD
-- version history
-- presence
-- typing indicators
-- AI chat
-- existing REST APIs
-
-Before modifying an existing service/component, understand how it is currently used.
-
-==================================================
-19. IMPLEMENTATION PROCESS
-==================================================
-
-Follow this order:
-
-STEP 1:
-Inspect the existing project architecture.
-
-STEP 2:
-Identify existing file/workspace state flow.
-
-STEP 3:
-Design the AI context contract.
-
-STEP 4:
-Implement current-file context first.
-
-STEP 5:
 Test:
-"What code is present in the currently opened file?"
 
-STEP 6:
-Implement workspace/file retrieval.
+```text
+A types → B + C receive
+B types → A + C receive
+C types → A + B receive
+```
 
-STEP 7:
-Implement structured AI actions.
+Verify:
 
-STEP 8:
-Implement CREATE_FILE with confirmation.
+* characters are not lost
+* characters are not duplicated
+* edits arrive correctly
+* no infinite WebSocket/Yjs loop
+* no stale content
+* editor remains responsive
+* cursor synchronization works
+* presence works
+* typing indicators work
 
-STEP 9:
-Implement UPDATE_FILE with diff + confirmation.
+Repeat with rapid typing.
 
-STEP 10:
-Integrate version history.
+---
 
-STEP 11:
-Test WebSocket synchronization.
+# 2. Human Editing While AI Is Open
 
-STEP 12:
-Test permissions/security.
+Open the AI panel in all clients.
 
-STEP 13:
-Run the complete frontend and backend.
+Do NOT apply any AI action.
 
-==================================================
-20. TEST CASES
-==================================================
+While AI panel is open:
 
-You MUST verify these cases:
+```text
+A types code
+```
 
-1.
-Open code.js.
+Verify B and C still receive the normal Yjs update immediately.
 
-Ask:
-"What code is present in this file?"
+The AI panel must not interfere with normal collaboration.
+
+---
+
+# 3. AI Proposal Isolation
+
+Ask AI:
+
+```text
+Modify this file by adding proper error handling.
+```
+
+Wait until the AI proposal appears.
+
+DO NOT click Apply.
+
+Verify:
+
+```text
+A → original code
+B → original code
+C → original code
+Database → original canonical code
+Yjs → original shared code
+```
+
+There must be:
+
+```text
+NO CODE_UPDATE
+NO YJS_UPDATE
+NO database canonical update
+```
+
+The proposal must exist only inside the AI UI.
+
+---
+
+# 4. Admin AI Apply
+
+Use an authorized admin.
+
+Apply the AI proposal.
+
+Verify the exact sequence:
+
+```text
+AI proposal
+ ↓
+Apply
+ ↓
+authorization
+ ↓
+expectedVersion validation
+ ↓
+database update
+ ↓
+version/history update
+ ↓
+transaction COMMIT
+ ↓
+afterCommit()
+ ↓
+CODE_UPDATE
+ ↓
+A + B + C receive update
+```
+
+Verify:
+
+* all clients show identical code
+* database contains identical code
+* version increments exactly once
+* exactly one history entry is created
+* no duplicate WebSocket event causes duplicate code
+* no stale code returns
+* no Yjs loop occurs
+
+---
+
+# 5. Continue Collaboration After AI Update
+
+Immediately after the AI update:
+
+```text
+A types
+```
+
+Verify:
+
+```text
+B + C receive it
+```
+
+Then:
+
+```text
+B types
+```
+
+Verify:
+
+```text
+A + C receive it
+```
+
+Then:
+
+```text
+C types
+```
+
+Verify:
+
+```text
+A + B receive it
+```
+
+This is a critical test.
+
+The AI update must NOT break the existing Yjs provider.
+
+---
+
+# 6. AI CREATE_FILE
+
+Ask AI to create a new file.
+
+Before Apply:
+
+```text
+No file in workspace
+No FILE_CREATED
+No collaborator sees file
+```
+
+After Apply:
+
+```text
+DB create
+ ↓
+COMMIT
+ ↓
+afterCommit()
+ ↓
+FILE_CREATED
+ ↓
+all collaborators
+ ↓
+loadTree()
+```
+
+Verify:
+
+* exactly one file exists
+* correct name
+* correct ID
+* correct parent
+* correct language
+* correct content
+* all clients see it
+* no duplicate tree entry
+
+---
+
+# 7. Non-Admin AI Update
+
+Use a non-admin user.
+
+Generate and Apply an AI modification.
 
 Expected:
-AI correctly describes actual code.js content.
 
-2.
-Switch to hello.js.
+```text
+AI proposal
+ ↓
+Apply
+ ↓
+PENDING review
+```
 
-Ask:
-"What is this file doing?"
+Before admin approval:
 
-Expected:
-AI uses hello.js, NOT code.js.
+```text
+Canonical DB → unchanged
+Yjs → unchanged
+A → unchanged
+B → unchanged
+C → unchanged
+NO CODE_UPDATE
+```
 
-3.
-Ask:
-"Explain the function on line 20."
-
-Expected:
-AI uses current file context.
-
-4.
-Ask:
-"Create sum.cpp that calculates the sum of N numbers."
-
-Expected:
-AI proposes CREATE_FILE.
-
-5.
-Click Create.
+Then approve it using an authorized admin.
 
 Expected:
-File appears in explorer and opens in editor.
 
-6.
-Ask:
-"Add error handling to this file."
+```text
+approval
+ ↓
+version validation
+ ↓
+DB update
+ ↓
+COMMIT
+ ↓
+afterCommit()
+ ↓
+CODE_UPDATE
+ ↓
+all collaborators
+```
+
+---
+
+# 8. Optimistic Lock Conflict
+
+Start with:
+
+```text
+version = N
+```
+
+A generates an AI proposal using:
+
+```text
+expectedVersion = N
+```
+
+Do NOT apply.
+
+B edits the file normally.
+
+Verify:
+
+```text
+version = N + 1
+```
+
+Now A applies the old AI proposal.
 
 Expected:
-AI proposes a diff.
 
-7.
-Reject the change.
+```text
+409 Conflict
+```
 
-Expected:
-File remains unchanged.
+Verify:
 
-8.
-Apply the change.
+```text
+B's newer code remains
+DB remains version N+1
+NO AI overwrite
+NO new AI history entry
+NO CODE_UPDATE
+NO Yjs mutation
+```
 
-Expected:
-Editor, database, WebSocket state and version history remain consistent.
+A should receive a clear conflict message.
 
-9.
-Ask:
-"Compare code.js and utils.js."
+---
 
-Expected:
-Only those relevant files are provided.
+# 9. Failed Transaction Test
 
-10.
-Ask:
-"Find authentication problems in the project."
+Verify the code path where the database transaction fails after the update operation has been attempted.
 
-Expected:
-AI retrieves relevant project files instead of receiving the entire workspace blindly.
+The critical requirement:
 
-==================================================
-FINAL REQUIREMENT
-==================================================
+```text
+TRANSACTION FAILS
+ ↓
+ROLLBACK
+ ↓
+NO afterCommit()
+ ↓
+NO CODE_UPDATE
+```
 
-Do not just make the chatbot receive a giant string containing all files.
+There must never be a situation where collaborators receive code that does not exist in the committed database.
 
-Build a clean, scalable "AI Workspace Context + Controlled Tool Execution" architecture.
+Pay special attention to:
 
-The final system should behave like:
+```text
+WorkSpaceService
+AiWorkspaceController
+TransactionSynchronizationManager
+afterCommit()
+RoomWebSocketHandler
+```
 
-CodeRoom Editor
-      ↕
-Workspace State
-      ↕
-AI Context Manager
-      ↕
-AI Service / Gemini
-      ↕
-Structured Tool Actions
-      ↕
-CodeRoom File/Folder Services
-      ↕
-PostgreSQL + WebSocket + Version History
+Do not change the implementation if this behavior is already correct.
 
-The AI is an assistant INSIDE CodeRoom, not a separate chatbot.
+---
 
-Before finishing, provide:
+# 10. Room Isolation
 
-1. Files changed
-2. Architecture implemented
-3. API changes
-4. AI context format
-5. Supported AI actions
-6. Security considerations
-7. How file creation/update works
-8. How version history is preserved
-9. Tests performed
-10. Any remaining limitations
+Create:
 
-Do not claim something is implemented unless you actually implemented and tested it.
+```text
+Room A
+Room B
+```
+
+Put separate users in each room.
+
+Perform:
+
+* normal edit in Room A
+* AI update in Room A
+* AI file creation in Room A
+
+Verify Room B receives:
+
+```text
+NO YJS updates
+NO CODE_UPDATE
+NO FILE_CREATED
+NO presence events belonging to Room A
+```
+
+Repeat in reverse.
+
+---
+
+# 11. Reconnection
+
+Perform an AI update.
+
+Then disconnect one client.
+
+Reconnect it.
+
+Verify:
+
+```text
+reconnect
+ ↓
+current canonical state
+ ↓
+current version
+```
+
+The client must NOT restore:
+
+* old code
+* pre-AI code
+* rejected AI proposal
+* stale Yjs state
+
+After reconnect:
+
+```text
+client edits
+ ↓
+other collaborators receive edit
+```
+
+Normal collaboration must continue.
+
+---
+
+# 12. Hard Refresh
+
+After:
+
+* normal edits
+* AI update
+* AI file creation
+
+perform a browser hard refresh.
+
+Verify:
+
+```text
+database
+=
+workspace tree
+=
+active file
+=
+editor content
+=
+current version
+```
+
+No stale React state should overwrite the canonical state.
+
+---
+
+# 13. Multiple AI Operations
+
+Perform several operations sequentially:
+
+```text
+AI UPDATE
+ ↓
+normal user edit
+ ↓
+AI UPDATE
+ ↓
+normal user edit
+ ↓
+AI CREATE_FILE
+ ↓
+normal user edit
+```
+
+Verify the workspace remains consistent after every operation.
+
+Check version numbers carefully.
+
+---
+
+# 14. Rapid Collaboration
+
+With 3 users, rapidly alternate:
+
+```text
+A types
+B types
+C types
+A types
+AI proposal
+B types
+C types
+A applies AI
+B types
+C types
+```
+
+Verify:
+
+* no lost edits
+* no duplicate edits
+* no stale AI content
+* no stale Yjs content
+* no editor crashes
+* no infinite loops
+* no WebSocket reconnect storm
+
+---
+
+# 15. Security / Authorization
+
+Verify that:
+
+* users cannot update files outside their room
+* users cannot apply unauthorized AI actions
+* non-admin users cannot bypass approval
+* invalid file IDs are rejected
+* invalid room IDs are rejected
+* AI cannot override `expectedVersion`
+* server does not trust AI-provided authorization information
+
+---
+
+# 16. Final Build Verification
+
+Run:
+
+```bash
+mvn compile
+```
+
+and:
+
+```bash
+npm run build
+```
+
+Both must succeed.
+
+Also check the browser console and backend logs for:
+
+```text
+WebSocket errors
+Yjs errors
+React errors
+uncaught exceptions
+reconnect loops
+duplicate event warnings
+```
+
+There should be no unexplained errors during the tests.
+
+---
+
+# DO NOT CHANGE
+
+Do NOT add:
+
+* another WebSocket implementation
+* another Yjs implementation
+* another versioning mechanism
+* polling
+* AI agents
+* RAG
+* vector databases
+* new collaboration architecture
+* unnecessary refactoring
+
+The existing architecture is frozen.
+
+---
+
+# FINAL REPORT
+
+Return exactly this structure:
+
+## Test Results
+
+| Test                              | Result    |
+| --------------------------------- | --------- |
+| 3-user human realtime editing     | PASS/FAIL |
+| Cursor/presence synchronization   | PASS/FAIL |
+| AI proposal isolation             | PASS/FAIL |
+| Admin AI UPDATE                   | PASS/FAIL |
+| Collaboration after AI UPDATE     | PASS/FAIL |
+| AI CREATE_FILE                    | PASS/FAIL |
+| Non-admin PENDING flow            | PASS/FAIL |
+| Admin approval flow               | PASS/FAIL |
+| Optimistic-lock conflict          | PASS/FAIL |
+| Failed transaction → no broadcast | PASS/FAIL |
+| Room isolation                    | PASS/FAIL |
+| Reconnection                      | PASS/FAIL |
+| Hard refresh consistency          | PASS/FAIL |
+| Multiple sequential AI operations | PASS/FAIL |
+| Rapid 3-user collaboration        | PASS/FAIL |
+| Authorization/security            | PASS/FAIL |
+| Backend build                     | PASS/FAIL |
+| Frontend build                    | PASS/FAIL |
+
+## Bugs Found
+
+List only reproducible or clearly proven bugs.
+
+## Bugs Fixed
+
+List only actual fixes made during this test.
+
+## Files Changed
+
+List only files actually modified.
+
+## Console/Backend Errors
+
+List any unexplained errors observed.
+
+## Final Status
+
+If every test passes:
+
+**FINAL SYNCHRONIZATION VERIFICATION: PASS**
+
+**No known synchronization issues remain.**
+
+If a test fails, explain the exact failure and root cause. Do not claim the system is complete.
+
+### IMPORTANT
+
+Do not report PASS merely because the source code looks correct or the project compiles.
+
+The purpose of this test is to verify the actual **human → Yjs → WebSocket** path and the **AI → approval → DB commit → afterCommit → broadcast** path.
