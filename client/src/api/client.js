@@ -1,8 +1,8 @@
-const BASE = 'http://localhost:8080/api';
+const BASE =
+  `${process.env.REACT_APP_API_URL || 'http://localhost:8080'}/api`;
 
-/** WebSocket base URL — used by RoomSocket.js */
-export const WS_BASE = 'ws://localhost:8080';
-
+export const WS_BASE =
+  process.env.REACT_APP_WS_URL || 'ws://localhost:8080';
 // ── Token storage ─────────────────────────────────────────────────────────────
 const TOKEN_KEY = 'coderoom_token';
 
