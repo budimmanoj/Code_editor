@@ -1,8 +1,8 @@
 const BASE =
-  `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/api`;
+  `${process.env.REACT_APP_API_URL || 'http://localhost:8080'}/api`;
 
 export const WS_BASE =
-  import.meta.env.VITE_WS_URL || 'ws://localhost:8080';
+  process.env.REACT_APP_WS_URL || 'ws://localhost:8080';
 // ── Token storage ─────────────────────────────────────────────────────────────
 const TOKEN_KEY = 'coderoom_token';
 
