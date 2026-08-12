@@ -178,8 +178,6 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   useEffect(() => { activeFileRef.current = activeFile; }, [activeFile]);
   useEffect(() => { onlineUsersRef.current = onlineUsers; }, [onlineUsers]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { reviewAndSaveRef.current = reviewAndSave; }, [reviewAndSave]);
 
   // ── Drag to Resize (Pointer Capture + RAF for smooth 60fps) ─────────────────
 
@@ -532,7 +530,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   // ── Explicit Save (Submit for Review) ─────────────────────────────────────
 
-  async function reviewAndSave() {
+  const reviewAndSave = useCallback(async () => {
     if (!activeFile) return;
     setSaving(true);
     setSaveMsg('submitting...');
@@ -560,7 +558,9 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       setTimeout(() => setSaveMsg(''), 3000);
       setSaving(false);
     }
-  }
+  }, [activeFile, yjsProvider, code, roomId, addToast, loadPendingFiles, sideTab, loadVersions, historyScope]);
+
+  useEffect(() => { reviewAndSaveRef.current = reviewAndSave; }, [reviewAndSave]);
 
   // ── Versions ───────────────────────────────────────────────────────────────
 
