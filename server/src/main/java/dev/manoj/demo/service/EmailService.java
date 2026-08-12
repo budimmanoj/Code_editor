@@ -1,22 +1,24 @@
 package dev.manoj.demo.service;
 
+import com.resend.Resend;
+import com.resend.core.exception.ResendException;
+import com.resend.services.emails.model.CreateEmailOptions;
+import com.resend.services.emails.model.CreateEmailResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
 @Service
 @Slf4j
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    private final Resend resend;
     private final String fromAddress;
 
     public EmailService(
-            JavaMailSender mailSender,
-            @Value("${mail.from:noreply@coderoom.dev}") String fromAddress) {
-        this.mailSender = mailSender;
+            @Value("${resend.api-key}") String apiKey,
+            @Value("${resend.from-email:CodeRoom <onboarding@resend.dev>}") String fromAddress) {
+        this.resend = new Resend(apiKey);
         this.fromAddress = fromAddress;
     }
 
@@ -52,16 +54,21 @@ public class EmailService {
 
     private void send(String to, String subject, String body) {
         try {
-            SimpleMailMessage msg = new SimpleMailMessage();
-            msg.setFrom(fromAddress);
-            msg.setTo(to);
-            msg.setSubject(subject);
-            msg.setText(body);
-            mailSender.send(msg);
-            log.info("Email sent to {} — subject: {}", to, subject);
-        } catch (Exception e) {
-            // Log but do not expose internal SMTP errors to the caller
+            CreateEmailOptions params = CreateEmailOptions.builder()
+                .from(fromAddress)
+                .to(to)
+                .subject(subject)
+                .text(body)
+                .build();
+
+            CreateEmailResponse data = resend.emails().send(params);
+            log.info("Email sent to {} — subject: {} (ID: {})", to, subject, data.getId());
+        } catch (ResendException e) {
+            // Log but do not expose internal Resend errors to the caller
             log.error("Failed to send email to {}: {}", to, e.getMessage());
+            throw new RuntimeException("Failed to send email. Please try again later.");
+        } catch (Exception e) {
+            log.error("Unexpected error sending email to {}: {}", to, e.getMessage());
             throw new RuntimeException("Failed to send email. Please try again later.");
         }
     }

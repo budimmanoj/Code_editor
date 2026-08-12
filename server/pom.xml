@@ -95,8 +95,9 @@
 		</dependency>
 		<!-- Email sending for OTP -->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-mail</artifactId>
+			<groupId>com.resend</groupId>
+			<artifactId>resend-java</artifactId>
+			<version>4.4.0</version>
 		</dependency>
 		<!-- Swagger / OpenAPI docs -->
 		<dependency>
