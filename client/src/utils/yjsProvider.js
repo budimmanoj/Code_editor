@@ -68,6 +68,23 @@ export class CodeRoomYjsProvider {
   }
 
   /**
+   * Replaces the entire content of the Yjs document.
+   * Only one client should call this (e.g., the initiator of an Approve/Reject)
+   * to avoid concurrent duplicate inserts.
+   */
+  resetContent(newContent) {
+    this.doc.transact(() => {
+      const length = this.ytext.length;
+      if (length > 0) {
+        this.ytext.delete(0, length);
+      }
+      if (newContent) {
+        this.ytext.insert(0, newContent);
+      }
+    });
+  }
+
+  /**
    * Called when a YJS_UPDATE message is received from the WebSocket.
    */
   handleUpdate(updateArray) {

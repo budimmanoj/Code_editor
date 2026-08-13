@@ -9,6 +9,7 @@ public class UpdateCodeDto {
     private UUID userId;
     private String content;
     private Integer expectedVersion;
+    private boolean isAutosave;
 
     public UUID getRoomId() { return roomId; }
     public void setRoomId(UUID roomId) { this.roomId = roomId; }
@@ -24,4 +25,7 @@ public class UpdateCodeDto {
 
     public Integer getExpectedVersion() { return expectedVersion; }
     public void setExpectedVersion(Integer expectedVersion) { this.expectedVersion = expectedVersion; }
+
+    public boolean isAutosave() { return isAutosave; }
+    public void setAutosave(boolean isAutosave) { this.isAutosave = isAutosave; }
 }

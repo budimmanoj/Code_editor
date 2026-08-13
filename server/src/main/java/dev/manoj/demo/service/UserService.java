@@ -11,6 +11,7 @@ import dev.manoj.demo.repository.PendingRegistrationRepository;
 import dev.manoj.demo.repository.RoomParticipantRepository;
 import dev.manoj.demo.repository.UserRepository;
 import dev.manoj.demo.security.JwtUtil;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,9 @@ public class UserService {
     private final JwtUtil jwtUtil;
     private final EmailService emailService;
     private final Random random = new Random();
+
+    @Value("${app.auth.skip-email-verification:false}")
+    private boolean skipEmailVerification;
 
     public UserService(UserRepository userRepository,
                        RoomParticipantRepository roomParticipantRepository,
@@ -76,6 +80,16 @@ public class UserService {
 
         // Cleanup any old pending registration for this email
         pendingRegistrationRepository.deleteByNormalizedEmail(normalized);
+
+        if (skipEmailVerification) {
+            User user = new User();
+            user.setUsername(dto.getUsername());
+            user.setEmail(normalized);
+            user.setPasswordHash(passwordEncoder.encode(dto.getPassword()));
+            user.setEmailVerified(true);
+            userRepository.save(user);
+            return new MessageResponseDto("Registration successful (Email verification bypassed). Please log in.");
+        }
 
         String otp = generateOtp();
         
@@ -256,6 +270,10 @@ public class UserService {
     }
 
     public MessageResponseDto sendChangePasswordOtp(UUID userId) {
+        if (skipEmailVerification) {
+            return new MessageResponseDto("OTP bypassed for development. You may enter any 6-digit code to proceed.");
+        }
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -287,7 +305,9 @@ public class UserService {
             throw new RuntimeException("New passwords do not match");
         }
 
-        getValidOtpRecord(userId, OtpPurpose.CHANGE_PASSWORD, dto.getOtp());
+        if (!skipEmailVerification) {
+            getValidOtpRecord(userId, OtpPurpose.CHANGE_PASSWORD, dto.getOtp());
+        }
         
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));

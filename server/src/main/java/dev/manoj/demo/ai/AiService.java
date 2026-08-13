@@ -266,6 +266,9 @@ public class AiService {
         // Build additional referenced files section
         String additionalFilesSection = buildAdditionalFilesSection(dto);
 
+        // Build history section
+        String historySection = buildHistorySection(dto);
+
         return aiProvider.complete("""
                 You are an expert programming assistant embedded in CodeRoom, a collaborative code editor.
                 You have access to the user's workspace and can read files and propose file operations.
@@ -300,6 +303,9 @@ public class AiService {
                 - Never make up file IDs — use only the IDs provided above
                 - If unsure whether to create or modify, ask the user (use TEXT type)
                 
+                ## PREVIOUS CONVERSATION
+                %s
+                
                 ## USER MESSAGE
                 %s
                 """.formatted(
@@ -308,6 +314,7 @@ public class AiService {
                         additionalFilesSection,
                         dto.getFileNodeId() != null ? dto.getFileNodeId().toString() : "null",
                         dto.getActiveFileName() != null ? dto.getActiveFileName() : "current file",
+                        historySection,
                         message));
     }
 
@@ -381,6 +388,20 @@ public class AiService {
             sb.append(content).append("\n```\n");
         }
         return sb.toString();
+    }
+
+    private String buildHistorySection(AiRequestDto dto) {
+        List<AiRequestDto.ChatMessage> history = dto.getHistory();
+        if (history == null || history.isEmpty()) {
+            return "No previous messages.";
+        }
+        
+        StringBuilder sb = new StringBuilder();
+        for (AiRequestDto.ChatMessage msg : history) {
+            String role = "user".equalsIgnoreCase(msg.getRole()) ? "User" : "AI";
+            sb.append(role).append(": ").append(msg.getContent()).append("\n\n");
+        }
+        return sb.toString().trim();
     }
 
     public String optimizeCode(String code, String language) {

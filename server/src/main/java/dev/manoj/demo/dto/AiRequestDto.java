@@ -92,6 +92,16 @@ public class AiRequestDto {
         public void setContent(String content) { this.content = content; }
     }
 
+    public static class ChatMessage {
+        private String role;
+        private String content;
+
+        public String getRole() { return role; }
+        public void setRole(String role) { this.role = role; }
+        public String getContent() { return content; }
+        public void setContent(String content) { this.content = content; }
+    }
+
     // ── Getters & Setters ─────────────────────────────────────────────────────
 
     public String getCode() { return code; }
@@ -132,4 +142,8 @@ public class AiRequestDto {
 
     public List<AdditionalFileContext> getAdditionalFiles() { return additionalFiles; }
     public void setAdditionalFiles(List<AdditionalFileContext> additionalFiles) { this.additionalFiles = additionalFiles; }
+
+    private List<ChatMessage> history;
+    public List<ChatMessage> getHistory() { return history; }
+    public void setHistory(List<ChatMessage> history) { this.history = history; }
 }

@@ -22,7 +22,7 @@ public class CodeController {
     }
 
     /** Save / submit code — ADMIN saves are approved immediately, USER saves create PENDING */
-    @PutMapping("/update")
+    @PostMapping("/update")
     public String updateCode(@RequestBody UpdateCodeDto dto, Authentication auth) {
         UUID userId = (UUID) auth.getPrincipal();
         dto.setUserId(userId);
@@ -73,7 +73,7 @@ public class CodeController {
                                  @PathVariable UUID versionId,
                                  Authentication auth) {
         UUID adminId = (UUID) auth.getPrincipal();
-        return workSpaceService.updateVersionStatus(roomId, versionId, CodeReviewStatus.REVIEWED, adminId);
+        return workSpaceService.updateVersionStatus(roomId, versionId, CodeReviewStatus.APPROVED, adminId);
     }
 
     /**

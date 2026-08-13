@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Bot, X, Send, Copy, ArrowLeftToLine, Paperclip, AlertCircle,
-  FilePlus, FileEdit, Check, XCircle, Loader, FolderOpen, Globe
+  FilePlus, FileEdit, Check, XCircle, Loader, FolderOpen, Globe, MessageSquarePlus
 } from 'lucide-react';
 import { api } from '../api/client';
 import './AiPanel.css';
@@ -187,7 +187,22 @@ export default function AiPanel({
 }) {
   const [currentMode, setCurrentMode] = useState('chat');
   const [input, setInput]     = useState('');
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem(`cr_ai_history_${roomId}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (history.length > 0) {
+      sessionStorage.setItem(`cr_ai_history_${roomId}`, JSON.stringify(history));
+    } else {
+      sessionStorage.removeItem(`cr_ai_history_${roomId}`);
+    }
+  }, [history, roomId]);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const [showModeMenu, setShowModeMenu] = useState(false);
@@ -227,14 +242,30 @@ export default function AiPanel({
       base.additionalFiles = mentionedFiles;
     }
 
+    // Send recent conversation history for workspace chat (bounded to last 10 messages)
+    const boundedHistory = history.slice(-10).map(h => {
+      let cleanedContent = h.content;
+      if (!cleanedContent && h.action) {
+        // Strip large code payloads from history to save tokens
+        const actionSummary = { ...h.action };
+        delete actionSummary.content;
+        delete actionSummary.newContent;
+        cleanedContent = JSON.stringify(actionSummary);
+      }
+      return {
+        role: h.role,
+        content: cleanedContent || ''
+      };
+    });
+
     switch (mode) {
       case 'debug':          return { ...base, error: text };
       case 'generate':       return { ...base, prompt: text };
       case 'commit-message': return { ...base, changes: text };
-      case 'chat':           return { ...base, message: text };
+      case 'chat':           return { ...base, message: text, history: boundedHistory };
       default:               return base;
     }
-  }, [code, language, roomId, fileNodeId, filename, tree, mentionedFiles]);
+  }, [code, language, roomId, fileNodeId, filename, tree, mentionedFiles, history]);
 
   // ── Send message ───────────────────────────────────────────────────────────
   const handleSend = async () => {
@@ -373,9 +404,14 @@ export default function AiPanel({
             </span>
           )}
         </div>
-        <button className="ai-close-btn" onClick={onClose} title="Close Panel">
-          <X size={16} />
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="ai-close-btn" onClick={() => setHistory([])} title="New Chat">
+            <MessageSquarePlus size={16} />
+          </button>
+          <button className="ai-close-btn" onClick={onClose} title="Close Panel">
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Context pills */}

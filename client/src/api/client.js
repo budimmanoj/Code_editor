@@ -89,7 +89,7 @@ export const api = {
   renameFileNode:      (roomId, fileNodeId, name)    => req('PATCH',  `/workspace/${roomId}/fileNode/${fileNodeId}/rename`, { name }),
 
   // Code & Versions
-  updateCode:          (roomId, fileNodeId, content)    => req('POST', `/code/update`, { roomId, fileNodeId, content }),
+  updateCode:          (dto)                            => req('POST', `/code/update`, dto),
   getFileVersions:     (roomId, fileNodeId)             => req('GET',  `/code/versions/${roomId}/${fileNodeId}`),
   getRoomVersions:     (roomId)                         => req('GET',  `/code/versions/room/${roomId}`),
   getHistory:          (roomId, scopeType, scopeId)     => req('GET',  `/code/history/${roomId}?scopeType=${scopeType}&scopeId=${scopeId}`),

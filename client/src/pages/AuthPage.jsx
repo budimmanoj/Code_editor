@@ -55,9 +55,14 @@ export default function AuthPage({ onLogin }) {
           password: form.password,
           confirmPassword: form.confirmPassword
         });
-        setSuccess(res.message || "OTP sent to your email");
-        startCountdown();
-        switchView('verify-otp');
+        if (res.message && res.message.toLowerCase().includes('bypassed')) {
+          setSuccess(res.message);
+          switchView('login');
+        } else {
+          setSuccess(res.message || "OTP sent to your email");
+          startCountdown();
+          switchView('verify-otp');
+        }
       }
       else if (view === 'verify-otp') {
         const user = await api.verifyRegistration({ email: form.email, otp: form.otp });
@@ -88,8 +93,12 @@ export default function AuthPage({ onLogin }) {
         setError("You are a new account, so register first!");
         setTimeout(() => switchView('register'), 1500);
       } else if (view === 'register' && err.message.toLowerCase().includes("already")) {
-        setError("You are already a user, go for login!");
-        setTimeout(() => switchView('login'), 1500);
+        if (err.message.toLowerCase().includes("email")) {
+          setError("Email is already registered, go to login!");
+          setTimeout(() => switchView('login'), 1500);
+        } else {
+          setError(err.message); // e.g. "Username already exists"
+        }
       } else {
         setError(err.message);
       }

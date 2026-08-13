@@ -14,6 +14,12 @@ public interface CodeVersionRepository extends JpaRepository<CodeVersion, UUID> 
 
     List<CodeVersion> findByFileNode_IdInOrderByCreatedAtDesc(List<UUID> fileNodeIds);
 
+    void deleteByFileNode_Id(UUID fileNodeId);
+
+    CodeVersion findFirstByFileNode_IdAndUser_IdOrderByCreatedAtDesc(UUID fileNodeId, UUID userId);
+    
+    CodeVersion findFirstByFileNode_IdOrderByCreatedAtDesc(UUID fileNodeId);
+
     @Query("SELECT c FROM CodeVersion c WHERE c.fileNode.room.id = :roomId AND c.status = :status ORDER BY c.createdAt DESC")
     List<CodeVersion> findByFileNode_Room_IdAndStatusOrderByCreatedAtDesc(@org.springframework.data.repository.query.Param("roomId") UUID roomId, @org.springframework.data.repository.query.Param("status") dev.manoj.demo.enums.CodeReviewStatus status);
 

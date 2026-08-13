@@ -133,7 +133,7 @@ public class WorkSpaceService {
         // for collaboration purposes, but the official reviewed content remains
         // the last admin-approved value until an admin approves this version.
 
-        CodeReviewStatus status = isAdmin ? CodeReviewStatus.REVIEWED : CodeReviewStatus.PENDING;
+        CodeReviewStatus status = isAdmin ? CodeReviewStatus.APPROVED : CodeReviewStatus.PENDING;
         CodeVersion version = new CodeVersion();
         version.setFileNode(fileNode);
         version.setUser(user);
@@ -267,7 +267,7 @@ public class WorkSpaceService {
     /**
      * Admin approves or rejects a pending version.
      *
-     * REVIEWED (approve) → updates fileNode.content to the approved version content.
+     * APPROVED (approve) → updates fileNode.content to the approved version content.
      *                       Broadcasts REVISION_APPROVED over WebSocket so live collaborators
      *                       can refresh their editor to the now-official content.
      * REJECTED            → marks the version rejected, stores optional comment.
@@ -298,7 +298,7 @@ public class WorkSpaceService {
 
         FileNode fileNode = version.getFileNode();
 
-        if (status == CodeReviewStatus.REVIEWED) {
+        if (status == CodeReviewStatus.APPROVED) {
             // Approval: the pending content becomes the canonical version
             String approvedContent = sanitizeContent(version.getContent());
             fileNode.setContent(approvedContent);
@@ -310,29 +310,35 @@ public class WorkSpaceService {
                 new org.springframework.transaction.support.TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
-                            "type",       "REVISION_APPROVED",
-                            "fileId",     fileNode.getId().toString(),
-                            "content",    approvedContent != null ? approvedContent : "",
-                            "approvedBy", reviewerName,
-                            "versionId",  versionId.toString()
-                        ));
+                        wsHandler.clearYjsBuffer(fileNode.getId().toString());
+                        Map<String, Object> payload = new java.util.HashMap<>();
+                        payload.put("type", "REVISION_APPROVED");
+                        payload.put("fileId", fileNode.getId().toString());
+                        payload.put("content", approvedContent != null ? approvedContent : "");
+                        payload.put("approvedBy", reviewerName);
+                        payload.put("versionId", versionId.toString());
+                        payload.put("initiatorId", adminId.toString());
+                        wsHandler.broadcastToAllInRoom(roomId.toString(), payload);
                     }
                 }
             );
 
         } else if (status == CodeReviewStatus.REJECTED) {
             // Rejection: fileNode.content stays as-is (the last approved version)
+            String revertedContent = sanitizeContent(fileNode.getContent());
             org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                 new org.springframework.transaction.support.TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        wsHandler.broadcastToAllInRoom(roomId.toString(), Map.of(
-                            "type",      "REVISION_REJECTED",
-                            "fileId",    fileNode.getId().toString(),
-                            "versionId", versionId.toString(),
-                            "reason",    reviewComment != null ? reviewComment : ""
-                        ));
+                        wsHandler.clearYjsBuffer(fileNode.getId().toString());
+                        Map<String, Object> payload = new java.util.HashMap<>();
+                        payload.put("type", "REVISION_REJECTED");
+                        payload.put("fileId", fileNode.getId().toString());
+                        payload.put("versionId", versionId.toString());
+                        payload.put("reason", reviewComment != null ? reviewComment : "");
+                        payload.put("content", revertedContent != null ? revertedContent : "");
+                        payload.put("initiatorId", adminId.toString());
+                        wsHandler.broadcastToAllInRoom(roomId.toString(), payload);
                     }
                 }
             );
@@ -353,7 +359,7 @@ public class WorkSpaceService {
                 revertVersion.setFileNode(fileNode);
                 revertVersion.setUser(admin);
                 revertVersion.setContent(revertContent);
-                revertVersion.setStatus(CodeReviewStatus.REVIEWED);
+                revertVersion.setStatus(CodeReviewStatus.APPROVED);
                 revertVersion.setReviewedBy(reviewerName);
                 revertVersion.setReviewedAt(LocalDateTime.now());
                 codeVersionRepository.save(revertVersion);
@@ -388,10 +394,36 @@ public class WorkSpaceService {
         revertVersion.setFileNode(fileNode);
         revertVersion.setUser(user);
         revertVersion.setContent(safeContent);
-        revertVersion.setStatus(CodeReviewStatus.PENDING);
+        revertVersion.setStatus(CodeReviewStatus.APPROVED);
         codeVersionRepository.save(revertVersion);
 
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+            new org.springframework.transaction.support.TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    wsHandler.clearYjsBuffer(fileNode.getId().toString());
+                    Map<String, Object> payload = new java.util.HashMap<>();
+                    payload.put("type", "REVISION_APPROVED");
+                    payload.put("fileId", fileNode.getId().toString());
+                    payload.put("content", safeContent != null ? safeContent : "");
+                    payload.put("approvedBy", "Admin (Revert)");
+                    payload.put("versionId", revertVersion.getId().toString());
+                    payload.put("initiatorId", userId.toString());
+                    wsHandler.broadcastToAllInRoom(roomId.toString(), payload);
+                }
+            }
+        );
+
         return safeContent != null ? safeContent : "";
+    }
+
+    private void deleteCodeVersionsRecursively(FileNode node) {
+        codeVersionRepository.deleteByFileNode_Id(node.getId());
+        if (node.getChildren() != null) {
+            for (FileNode child : node.getChildren()) {
+                deleteCodeVersionsRecursively(child);
+            }
+        }
     }
 
     /**
@@ -515,10 +547,13 @@ public class WorkSpaceService {
      * Delete a file node (and all its children recursively via CascadeType.ALL).
      * Any participant can delete.
      */
+    @org.springframework.transaction.annotation.Transactional
     public void deleteFileNode(UUID roomId, UUID fileNodeId, UUID userId) {
         requireParticipant(roomId, userId);
         FileNode node = fileNodeRepository.findByIdAndRoom_Id(fileNodeId, roomId)
                 .orElseThrow(() -> new RuntimeException("File not found in this room"));
+        
+        deleteCodeVersionsRecursively(node);
         fileNodeRepository.delete(node);
     }
 

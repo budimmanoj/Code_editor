@@ -159,6 +159,10 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   // AI Panel state
   const [showAiPanel, setShowAiPanel] = useState(false);
 
+  // History secondary filters
+  const [filterAuthor, setFilterAuthor] = useState('ALL');
+  const [filterStatus, setFilterStatus] = useState('ALL');
+
   // Upload drag-drop state
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // { done, total, label }
@@ -247,8 +251,6 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     const socket = new RoomSocket(roomId, tokenStore.get());
     socketRef.current = socket;
 
-    socket.on('connected', () => setWsConnected(true));
-    socket.on('disconnected', () => setWsConnected(false));
 
     socket.on('PRESENCE_INIT', (msg) => {
       const map = new Map();
@@ -293,6 +295,22 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       });
     });
 
+    // Request state again on reconnect
+    socket.on('connected', () => {
+      setWsConnected(true);
+      setYjsProvider(prev => {
+        if (prev) {
+          socket.send({
+            type: 'YJS_REQUEST_STATE',
+            fileId: prev.fileId,
+          });
+        }
+        return prev;
+      });
+    });
+
+    socket.on('disconnected', () => setWsConnected(false));
+
     socket.on('FILE_CREATED', (msg) => {
       // Reload the file tree so the new file appears for all collaborators
       loadTree();
@@ -319,17 +337,32 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
         }
       }
     });
-    // Admin approved a version — do NOT overwrite the collaborative editor content!
+    // Admin approved a version
     socket.on('REVISION_APPROVED', (msg) => {
       if (activeFileRef.current && activeFileRef.current.id === msg.fileId) {
         addToast(`✅ ${msg.approvedBy} approved this file`, 'info');
       }
       // Refresh version list if history tab is open
       setVersions(prev => prev.map(v =>
-        v.id === msg.versionId ? { ...v, status: 'REVIEWED', reviewedBy: msg.approvedBy } : v
+        v.id === msg.versionId ? { ...v, status: 'APPROVED', reviewedBy: msg.approvedBy } : v
       ));
       // Decrement pending badge
       setPendingCount(c => Math.max(0, c - 1));
+
+      // Snap the live editor to the official approved content
+      if (activeFileRef.current && activeFileRef.current.id === msg.fileId && msg.content !== undefined) {
+        setCode(msg.content);
+        setSavedCode(msg.content);
+        
+        if (msg.initiatorId === user.id) {
+          setYjsProvider(prev => {
+            if (prev) {
+              prev.resetContent(msg.content);
+            }
+            return prev;
+          });
+        }
+      }
     });
 
     // Admin rejected a version
@@ -339,6 +372,21 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       ));
       setPendingCount(c => Math.max(0, c - 1));
       addToast(`❌ A version was rejected: ${msg.reason || 'no comment'}`, 'leave');
+
+      // Force revert live editor to last approved content
+      if (activeFileRef.current && activeFileRef.current.id === msg.fileId && msg.content !== undefined) {
+        setCode(msg.content);
+        setSavedCode(msg.content);
+        
+        if (msg.initiatorId === user.id) {
+          setYjsProvider(prev => {
+            if (prev) {
+              prev.resetContent(msg.content);
+            }
+            return prev;
+          });
+        }
+      }
     });
 
     socket.on('TYPING', (msg) => {
@@ -403,22 +451,40 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   // Sync viewCodeOldContent when viewing a diff
   useEffect(() => {
     if (viewCodeVersion && viewCodeVersion.fileNodeId) {
-      if (viewCodeVersion.status === 'PENDING') {
-        // Pending approval: Compare against CURRENT canonical file code
-        api.getFile(roomId, viewCodeVersion.fileNodeId)
-          .then(content => setViewCodeOldContent(content))
-          .catch(() => setViewCodeOldContent('// Error loading original code'));
-      } else {
-        // Historical version: Compare against chronologically previous version
-        const idx = versions.findIndex(v => v.id === viewCodeVersion.id);
-        if (idx !== -1 && idx + 1 < versions.length) {
-          setViewCodeOldContent(versions[idx + 1].content);
-        } else {
-          setViewCodeOldContent('');
+      let oldContent = '';
+      
+      // Find all APPROVED versions for the exact same file
+      const approvedVersions = versions.filter(v => 
+        v.fileNodeId === viewCodeVersion.fileNodeId && 
+        v.status === 'APPROVED'
+      );
+
+      if (approvedVersions.length > 0) {
+        // Sort chronologically descending (newest first)
+        approvedVersions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        
+        const selectedTime = new Date(viewCodeVersion.createdAt).getTime();
+        
+        // Find the newest APPROVED version that was created BEFORE the selected version
+        const previousApproved = approvedVersions.find(v => {
+          const vTime = new Date(v.createdAt).getTime();
+          return vTime < selectedTime;
+        });
+
+        if (previousApproved && typeof previousApproved.content === 'string') {
+          oldContent = previousApproved.content;
+        } else if (approvedVersions.length > 0 && typeof approvedVersions[approvedVersions.length - 1].content === 'string') {
+          // Fallback to the very first approved version if something goes wrong with timestamps
+          oldContent = approvedVersions[approvedVersions.length - 1].content;
         }
       }
+      
+      console.log(`[Diff Viewer] Selected: ${viewCodeVersion.id} (${viewCodeVersion.status})`);
+      console.log(`[Diff Viewer] Baseline content type: ${typeof oldContent}, length: ${oldContent.length}`);
+      
+      setViewCodeOldContent(oldContent);
     }
-  }, [viewCodeVersion, versions, roomId]);
+  }, [viewCodeVersion, versions]);
 
   const loadVersions = useCallback(async (scope) => {
     if (!scope || !roomId) return;
@@ -473,7 +539,11 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       const draft = sessionStorage.getItem(`cr_code_${roomId}_${activeFile.id}`);
       const initialContent = (!draft || draft === content) ? content : draft;
       setCode(initialContent);
-      if (!draft || draft === content) setSaveMsg('');
+      if (!draft || draft === content) {
+        setSaveMsg('');
+      } else {
+        setSaveMsg('Unsaved');
+      }
 
       // Initialize Yjs Provider
       setYjsProvider(prev => {
@@ -530,10 +600,10 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
   // ── Explicit Save (Submit for Review) ─────────────────────────────────────
 
-  const reviewAndSave = useCallback(async () => {
+  const reviewAndSave = useCallback(async (isAutosave = false) => {
     if (!activeFile) return;
     setSaving(true);
-    setSaveMsg('submitting...');
+    setSaveMsg('Saving...');
     try {
       // Get the latest text directly from the Yjs document if available
       const textToSave = yjsProvider ? yjsProvider.ytext.toString() : code;
@@ -541,26 +611,44 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       const data = await api.updateCode({
         roomId,
         fileNodeId: activeFile.id,
-        content: textToSave
+        content: textToSave,
+        autosave: isAutosave
       });
       setSavedCode(textToSave);
-      setSaveMsg(typeof data === 'string' ? data : 'Saved'); // e.g. "Code submitted for review"
-      addToast('Change submitted successfully', 'info');
+      setSaveMsg('Saved ✓');
+      // addToast('Change submitted successfully', 'info'); // removed to avoid spamming toast on autosave
       loadPendingFiles();
       if (sideTab === 'history') {
         loadVersions(historyScope);
       }
     } catch (err) {
-      setSaveMsg('error');
+      setSaveMsg('Save failed — Retry');
       addToast('Failed to save: ' + (err.message || 'unknown error'), 'error');
       console.error('[Save] Error:', err);
     } finally {
-      setTimeout(() => setSaveMsg(''), 3000);
+      setTimeout(() => {
+        setSaveMsg((prev) => (prev === 'Saved ✓' ? '' : prev));
+      }, 3000);
       setSaving(false);
     }
   }, [activeFile, yjsProvider, code, roomId, addToast, loadPendingFiles, sideTab, loadVersions, historyScope]);
 
   useEffect(() => { reviewAndSaveRef.current = reviewAndSave; }, [reviewAndSave]);
+
+  // ── Autosave (Debounced) ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!activeFile) return;
+    if (code === savedCode) return; // No unsaved changes
+    if (saveMsg === 'Saving...') return; // Prevent loop
+
+    setSaveMsg('Unsaved');
+
+    const handler = setTimeout(() => {
+      reviewAndSave(true);
+    }, 30000);
+
+    return () => clearTimeout(handler);
+  }, [code, savedCode, activeFile, reviewAndSave, saveMsg]);
 
   // ── Versions ───────────────────────────────────────────────────────────────
 
@@ -1052,10 +1140,19 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
         <div className="topbar-right">
           {downloadMsg && <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{downloadMsg}</span>}
-          {saveMsg === 'unsaved' && <span className="save-badge unsaved">● unsaved</span>}
-          {saveMsg === 'saving' && <span className="save-badge saved">● saving...</span>}
-          {saveMsg === 'saved' && <span className="save-badge saved">✓ saved</span>}
-          {saveMsg === 'error' && <span className="save-badge error-badge">✗ save failed</span>}
+          {saveMsg === 'Unsaved' && <span className="save-badge unsaved">● Unsaved</span>}
+          {saveMsg === 'Saving...' && <span className="save-badge saved">● Saving...</span>}
+          {saveMsg === 'Saved ✓' && <span className="save-badge saved">✓ Saved</span>}
+          {saveMsg === 'Save failed — Retry' && (
+            <span 
+              className="save-badge error-badge" 
+              onClick={() => reviewAndSaveRef.current?.()} 
+              style={{cursor: 'pointer'}}
+              title="Click to retry saving"
+            >
+              ✗ Save failed — Retry
+            </span>
+          )}
 
           <button className={`topbar-btn ${showAiPanel ? 'active' : ''}`}
             onClick={() => setShowAiPanel(p => !p)} title="AI Assistant (Ctrl+`)">
@@ -1066,7 +1163,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
             <Archive size={18} />
           </button>
 
-          <button className="topbar-btn" onClick={reviewAndSave} disabled={!activeFile || saving} title="Save (Ctrl+S)">
+          <button className="topbar-btn" onClick={() => reviewAndSave(false)} disabled={!activeFile || saving} title="Save (Ctrl+S)">
             <Save size={18} />
           </button>
 
@@ -1189,26 +1286,34 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                   );
                 })()}
 
-                {/* Approvals / Versions tabs */}
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--line1)', marginTop: '4px' }}>
-                  <button
-                    onClick={() => setHistoryTab('approvals')}
+                {/* Secondary filters */}
+                <div style={{ display: 'flex', gap: '6px', marginTop: '4px', paddingBottom: '6px', borderBottom: '1px solid var(--line1)' }}>
+                  <select
+                    value={filterAuthor}
+                    onChange={e => setFilterAuthor(e.target.value)}
                     style={{
-                      flex: 1, padding: '7px 0', background: 'transparent', border: 'none',
-                      color: historyTab === 'approvals' ? 'var(--text0)' : 'var(--text1)',
-                      borderBottom: historyTab === 'approvals' ? '2px solid var(--primary)' : '2px solid transparent',
-                      fontWeight: historyTab === 'approvals' ? 600 : 400, cursor: 'pointer', fontSize: '12px',
+                      flex: 1, background: 'transparent', color: 'var(--text1)', border: '1px solid var(--line2)',
+                      borderRadius: '4px', padding: '2px 4px', fontSize: '11px', outline: 'none',
                     }}
-                  >Approvals</button>
-                  <button
-                    onClick={() => setHistoryTab('versions')}
+                  >
+                    <option value="ALL">Author: All</option>
+                    <option value="ADMIN">Admin</option>
+                    <option value="USER">User</option>
+                  </select>
+
+                  <select
+                    value={filterStatus}
+                    onChange={e => setFilterStatus(e.target.value)}
                     style={{
-                      flex: 1, padding: '7px 0', background: 'transparent', border: 'none',
-                      color: historyTab === 'versions' ? 'var(--text0)' : 'var(--text1)',
-                      borderBottom: historyTab === 'versions' ? '2px solid var(--primary)' : '2px solid transparent',
-                      fontWeight: historyTab === 'versions' ? 600 : 400, cursor: 'pointer', fontSize: '12px',
+                      flex: 1, background: 'transparent', color: 'var(--text1)', border: '1px solid var(--line2)',
+                      borderRadius: '4px', padding: '2px 4px', fontSize: '11px', outline: 'none',
                     }}
-                  >Versions</button>
+                  >
+                    <option value="ALL">Status: All</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
                 </div>
               </div>
               <div className="history-list">
@@ -1271,7 +1376,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                         {/* Timeline dot */}
                         <div style={{
                           position: 'absolute', left: '-8px', top: '16px', width: '12px', height: '12px', borderRadius: '50%',
-                          background: v.status === 'PENDING' ? '#f97316' : v.status === 'REVIEWED' ? '#22c55e' : '#ef4444',
+                          background: v.status === 'PENDING' ? '#f97316' : v.status === 'APPROVED' ? '#22c55e' : '#ef4444',
                           border: '2px solid var(--bg1)', zIndex: 1
                         }} />
 
@@ -1285,11 +1390,11 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                           <span className="history-status" style={{
                             background:
                               v.status === 'PENDING' ? '#f97316' :
-                                v.status === 'REVIEWED' ? '#22c55e' : '#ef4444',
+                                v.status === 'APPROVED' ? '#22c55e' : '#ef4444',
                             color: '#fff', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700, flexShrink: 0,
                           }}>
                             {v.status === 'PENDING' ? '⏳ Pending' :
-                              v.status === 'REVIEWED' ? '✅ Approved' : '❌ Rejected'}
+                              v.status === 'APPROVED' ? '✅ Approved' : '❌ Rejected'}
                           </span>
                         </div>
 
@@ -1321,8 +1426,22 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
                         <div className="history-actions" style={{ marginTop: '6px' }}>
                           <button className="history-btn revert" onClick={() => setViewCodeVersion(v)}>View Changes</button>
-                          {isAdmin && v.status === 'REVIEWED' && (
+                          {isAdmin && v.status === 'APPROVED' && (
                             <button className="history-btn revert" onClick={() => revertToVersion(v.id)}>Revert</button>
+                          )}
+                          {isAdmin && v.status === 'PENDING' && (
+                            <>
+                              <button
+                                className="history-btn review"
+                                style={{ background: '#22c55e', color: '#fff' }}
+                                onClick={() => approveVersion(v.id)}
+                              ><CheckCircle2 size={12} /> Approve</button>
+                              <button
+                                className="history-btn no-change"
+                                style={{ background: '#ef4444', color: '#fff' }}
+                                onClick={() => { setRejectDialog({ versionId: v.id }); setRejectComment(''); }}
+                              ><XCircle size={12} /> Reject</button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -1332,18 +1451,28 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                   // Version numbers are assigned newest=highest, oldest=1
                   const totalVersions = sorted.length;
 
+                  // Filter and map
+                  let filtered = sorted;
+                  
+                  if (filterStatus !== 'ALL') {
+                    filtered = filtered.filter(v => v.status === filterStatus);
+                  }
+                  
+                  if (filterAuthor !== 'ALL') {
+                    filtered = filtered.filter(v => {
+                      const participant = participants.find(p => p.userId === v.userId);
+                      const role = participant ? participant.role : null;
+                      return role === filterAuthor;
+                    });
+                  }
+
+                  // Render unified list using renderVersionCard (and add Approval buttons for PENDING)
                   return (
                     <>
-                      {historyTab === 'approvals' && (
-                        pendingVersions.length === 0
-                          ? <div style={{ padding: '16px 12px', color: 'var(--text2)', fontSize: '12px', textAlign: 'center' }}>✓ No pending approvals</div>
-                          : pendingVersions.map((v, i) => renderApprovalCard(v, i))
-                      )}
-                      {historyTab === 'versions' && (
-                        sorted.length === 0
-                          ? <div style={{ padding: '16px 12px', color: 'var(--text2)', fontSize: '12px', textAlign: 'center' }}>No versions yet</div>
-                          : sorted.map((v, i) => renderVersionCard(v, totalVersions - i))
-                      )}
+                      {filtered.length === 0
+                        ? <div style={{ padding: '16px 12px', color: 'var(--text2)', fontSize: '12px', textAlign: 'center' }}>No history matches criteria</div>
+                        : filtered.map((v) => renderVersionCard(v, sorted.length - sorted.indexOf(v)))
+                      }
                     </>
                   );
                 })()}
@@ -1356,8 +1485,8 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                   display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999,
                 }}>
                   <div style={{
-                    background: 'var(--surface2)', borderRadius: 10, padding: 20, width: 320,
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                    background: 'var(--bg1)', borderRadius: 10, padding: 20, width: 320,
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.15)', border: '1px solid var(--line2)',
                   }}>
                     <h3 style={{ margin: '0 0 12px', color: 'var(--text0)', fontSize: 16 }}>Reject Version</h3>
                     <p style={{ margin: '0 0 10px', color: 'var(--text1)', fontSize: 13 }}>Add an optional rejection reason:</p>
@@ -1367,7 +1496,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                       placeholder="e.g. Please handle null inputs before resubmitting..."
                       rows={4}
                       style={{
-                        width: '100%', background: 'var(--surface1)', border: '1px solid var(--border)',
+                        width: '100%', background: 'var(--bg0)', border: '1px solid var(--line2)',
                         color: 'var(--text0)', borderRadius: 6, padding: 8, fontSize: 13, resize: 'vertical',
                         boxSizing: 'border-box',
                       }}
@@ -1375,7 +1504,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                     <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
                       <button
                         onClick={() => { setRejectDialog(null); setRejectComment(''); }}
-                        style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text1)', cursor: 'pointer' }}
+                        style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--line2)', background: 'transparent', color: 'var(--text1)', cursor: 'pointer' }}
                       >Cancel</button>
                       <button
                         onClick={() => rejectVersion(rejectDialog.versionId, rejectComment)}
