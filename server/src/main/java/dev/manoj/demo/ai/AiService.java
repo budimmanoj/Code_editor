@@ -285,13 +285,15 @@ public class AiService {
                 Return ONLY valid JSON:
                 {"type":"TEXT","result":"your answer here (can include markdown)"}
                 
-                ### 2. File action (when user asks to create or modify a file):
+                ### 2. File action(s) (when user asks to create or modify one OR MULTIPLE files):
                 
-                For CREATE_FILE:
-                {"type":"ACTION","action":{"type":"CREATE_FILE","fileName":"example.cpp","language":"cpp","content":"// The COMPLETE and FULL file content goes here. DO NOT truncate. DO NOT use placeholders like '...' or '// rest of code'. You must provide the fully implemented, working code."}}
+                You can propose multiple actions at once by returning an array of actions:
+                {"type":"ACTIONS","actions":[
+                  {"type":"CREATE_FILE","fileName":"example.cpp","language":"cpp","content":"// The COMPLETE and FULL file content goes here. DO NOT truncate. You must provide the fully implemented, working code."},
+                  {"type":"UPDATE_FILE","fileId":"%s","fileNameForDisplay":"%s","newContent":"// The COMPLETE new file content goes here. DO NOT truncate. You must provide the full, unmodified parts of the file alongside your changes."}
+                ]}
                 
-                For UPDATE_FILE (propose full replacement of active file):
-                {"type":"ACTION","action":{"type":"UPDATE_FILE","fileId":"%s","fileNameForDisplay":"%s","newContent":"// The COMPLETE new file content goes here. DO NOT truncate. You must provide the full, unmodified parts of the file alongside your changes."}}
+                If it's just a single action, you MUST STILL return the array with one element (e.g. `{"type": "ACTIONS", "actions": [...] }`).
                 
                 ## IMPORTANT RULES
                 - ALWAYS respond with valid JSON — never plain text outside JSON

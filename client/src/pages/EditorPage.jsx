@@ -1225,8 +1225,8 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
           <div className="sidebar-content">
             {/* Files tab */}
-            <div className={sideTab === 'files' ? '' : 'hide'}>
-              <div className="sidebar-header">
+            <div className={sideTab === 'files' ? '' : 'hide'} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div className="sidebar-header" style={{ flexShrink: 0 }}>
                 <span className="sidebar-title">Explorer</span>
                 <div className="sidebar-actions" style={{ display: 'flex', gap: 4 }}>
                   <button className="btn-icon" title="Upload Files" onClick={() => fileInputRef.current.click()}><Upload size={14} /></button>
@@ -1235,22 +1235,24 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                 </div>
               </div>
               {error && (
-                <div className="sidebar-error">
+                <div className="sidebar-error" style={{ flexShrink: 0 }}>
                   {error}
                   <button style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
                     onClick={() => setError('')}>✕</button>
                 </div>
               )}
-              <FileTree
-                tree={tree}
-                selectedId={activeFile?.id}
-                pendingIds={pendingFileIds}
-                onSelect={(id, name) => { selectFile(id, name); setHistoryScope({ type: 'FILE', id, name }); }}
-                onAddFile={(parentId) => setModal({ type: 'FILE', parentId })}
-                onAddFolder={(parentId) => setModal({ type: 'FOLDER', parentId })}
-                onDelete={requestDelete}
-                onRename={handleRename}
-              />
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                <FileTree
+                  tree={tree}
+                  selectedId={activeFile?.id}
+                  pendingIds={pendingFileIds}
+                  onSelect={(id, name) => { selectFile(id, name); setHistoryScope({ type: 'FILE', id, name }); }}
+                  onAddFile={(parentId) => setModal({ type: 'FILE', parentId })}
+                  onAddFolder={(parentId) => setModal({ type: 'FOLDER', parentId })}
+                  onDelete={requestDelete}
+                  onRename={handleRename}
+                />
+              </div>
             </div>
 
             {/* History tab */}

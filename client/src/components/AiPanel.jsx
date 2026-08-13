@@ -251,6 +251,14 @@ export default function AiPanel({
         delete actionSummary.content;
         delete actionSummary.newContent;
         cleanedContent = JSON.stringify(actionSummary);
+      } else if (!cleanedContent && h.actions) {
+        const actionsSummary = h.actions.map(a => {
+          const sum = { ...a };
+          delete sum.content;
+          delete sum.newContent;
+          return sum;
+        });
+        cleanedContent = JSON.stringify(actionsSummary);
       }
       return {
         role: h.role,
@@ -284,11 +292,12 @@ export default function AiPanel({
     try {
       const resp = await api.aiCall(currentMode, buildPayload(currentMode, text));
 
-      if (resp.responseType === 'ACTION' && resp.action) {
+      if ((resp.responseType === 'ACTION' || resp.responseType === 'ACTIONS') && (resp.action || resp.actions)) {
+        const aiActions = resp.actions || (resp.action ? [resp.action] : []);
         setHistory(prev => [...prev, {
           role: 'ai',
           content: null,
-          action: resp.action,
+          actions: aiActions,
           mode: currentMode,
         }]);
       } else {
@@ -445,36 +454,43 @@ export default function AiPanel({
         ) : (
           history.map((msg, idx) => (
             <div key={idx} className={`chat-message ${msg.role}`}>
-              {msg.role === 'ai' && msg.action ? (
-                /* Action card */
-                msg.action.type === 'CREATE_FILE' ? (
-                  <CreateFileCard
-                    action={msg.action}
-                    roomId={roomId}
-                    onConfirm={(result) => {
-                      if (onFileCreated) onFileCreated(result.fileId, result.fileName);
-                    }}
-                    onCancel={() => {}}
-                  />
-                ) : msg.action.type === 'UPDATE_FILE' ? (
-                  <UpdateFileCard
-                    key={idx}
-                    action={{ ...msg.action, expectedVersion: activeFileVersion }}
-                    currentCode={code}
-                    roomId={roomId}
-                    onConfirm={(result, newContent) => {
-                      if (onCodeUpdated) onCodeUpdated(msg.action.fileId, newContent);
-                    }}
-                    onCancel={() => {
-                      setHistory(prev => prev.filter((_, i) => i !== idx));
-                    }}
-                    onInsertCode={onInsertCode}
-                  />
-                ) : (
-                  <div className="chat-bubble">
-                    <pre style={{ whiteSpace: 'pre-wrap' }}>Unknown action: {msg.action.type}</pre>
-                  </div>
-                )
+              {msg.role === 'ai' && msg.actions && msg.actions.length > 0 ? (
+                /* Action cards */
+                <div className="ai-actions-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {msg.actions.map((act, actIdx) => (
+                    act.type === 'CREATE_FILE' ? (
+                      <CreateFileCard
+                        key={`act-${idx}-${actIdx}`}
+                        action={act}
+                        roomId={roomId}
+                        onConfirm={(result) => {
+                          if (onFileCreated) onFileCreated(result.fileId, result.fileName);
+                        }}
+                        onCancel={() => {}}
+                      />
+                    ) : act.type === 'UPDATE_FILE' ? (
+                      <UpdateFileCard
+                        key={`act-${idx}-${actIdx}`}
+                        action={{ ...act, expectedVersion: activeFileVersion }}
+                        currentCode={code}
+                        roomId={roomId}
+                        onConfirm={(result, newContent) => {
+                          if (onCodeUpdated) onCodeUpdated(act.fileId, newContent);
+                        }}
+                        onCancel={() => {
+                          // Note: this removes the whole message (all actions) which might not be ideal
+                          // if there are multiple actions, but for now we keep the same behavior
+                          setHistory(prev => prev.filter((_, i) => i !== idx));
+                        }}
+                        onInsertCode={onInsertCode}
+                      />
+                    ) : (
+                      <div key={`act-${idx}-${actIdx}`} className="chat-bubble">
+                        <pre style={{ whiteSpace: 'pre-wrap' }}>Unknown action: {act.type}</pre>
+                      </div>
+                    )
+                  ))}
+                </div>
               ) : (
                 /* Normal text message */
                 <div className="chat-bubble">

@@ -197,7 +197,16 @@ public class AiController {
             JsonNode root = objectMapper.readTree(json);
             String type = root.path("type").asText("TEXT");
 
-            if ("ACTION".equals(type)) {
+            if ("ACTIONS".equals(type)) {
+                JsonNode actionsNode = root.path("actions");
+                java.util.List<AiActionDto> actions = new java.util.ArrayList<>();
+                if (actionsNode.isArray()) {
+                    for (JsonNode actionNode : actionsNode) {
+                        actions.add(objectMapper.treeToValue(actionNode, AiActionDto.class));
+                    }
+                }
+                return new AiResponseDto(actions, "gemini");
+            } else if ("ACTION".equals(type)) {
                 JsonNode actionNode = root.path("action");
                 AiActionDto action = objectMapper.treeToValue(actionNode, AiActionDto.class);
                 return new AiResponseDto(action, "gemini");
