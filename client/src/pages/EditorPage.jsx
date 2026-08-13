@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Download, Save, LogOut, Code2, Upload, FolderUp, FileCode, Bot, History, Users, RefreshCw, Archive, CheckCircle2, XCircle } from 'lucide-react';
 import ReactDiffViewer from 'react-diff-viewer-continued';
