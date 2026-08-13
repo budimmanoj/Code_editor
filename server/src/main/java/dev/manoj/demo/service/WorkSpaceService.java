@@ -103,10 +103,12 @@ public class WorkSpaceService {
      *          admin-approved version stays intact until an admin reviews it.
      */
     public String updateCode(UpdateCodeDto dto) {
-        requireParticipant(dto.getRoomId(), dto.getUserId());
         FileNode fileNode = fileNodeRepository
-                .findByIdAndRoom_Id(dto.getFileNodeId(), dto.getRoomId())
-                .orElseThrow(() -> new RuntimeException("File not found in this room"));
+                .findById(dto.getFileNodeId())
+                .orElseThrow(() -> new RuntimeException("File not found"));
+
+        UUID actualRoomId = fileNode.getRoom().getId();
+        requireParticipant(actualRoomId, dto.getUserId());
 
         String safeContent = sanitizeContent(dto.getContent());
 
@@ -120,7 +122,8 @@ public class WorkSpaceService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         RoomParticipant p = roomParticipantRepository
-                .findByRoom_IdAndUser_Id(dto.getRoomId(), dto.getUserId()).orElse(null);
+                .findByRoom_IdAndUser_Id(actualRoomId, dto.getUserId()).orElse(null);
+        
         boolean isAdmin = p != null && p.getRole() == RoomRole.ADMIN;
 
         if (isAdmin) {

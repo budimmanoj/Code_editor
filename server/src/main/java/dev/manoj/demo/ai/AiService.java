@@ -288,10 +288,10 @@ public class AiService {
                 ### 2. File action (when user asks to create or modify a file):
                 
                 For CREATE_FILE:
-                {"type":"ACTION","action":{"type":"CREATE_FILE","fileName":"example.cpp","language":"cpp","content":"// full file content here"}}
+                {"type":"ACTION","action":{"type":"CREATE_FILE","fileName":"example.cpp","language":"cpp","content":"// The COMPLETE and FULL file content goes here. DO NOT truncate. DO NOT use placeholders like '...' or '// rest of code'. You must provide the fully implemented, working code."}}
                 
                 For UPDATE_FILE (propose full replacement of active file):
-                {"type":"ACTION","action":{"type":"UPDATE_FILE","fileId":"%s","fileNameForDisplay":"%s","newContent":"// complete new file content"}}
+                {"type":"ACTION","action":{"type":"UPDATE_FILE","fileId":"%s","fileNameForDisplay":"%s","newContent":"// The COMPLETE new file content goes here. DO NOT truncate. You must provide the full, unmodified parts of the file alongside your changes."}}
                 
                 ## IMPORTANT RULES
                 - ALWAYS respond with valid JSON — never plain text outside JSON
@@ -300,6 +300,7 @@ public class AiService {
                 - When the user asks what code is in a file, describe it based on the ACTIVE FILE CONTEXT above
                 - When the user asks to CREATE a file, use CREATE_FILE action
                 - When the user asks to MODIFY/UPDATE/ADD TO the current file, use UPDATE_FILE action with the complete new content
+                - NEVER TRUNCATE CODE. NEVER use '...' or comments like '// rest of code here'. You MUST provide the fully working, complete code for both CREATE_FILE and UPDATE_FILE actions. This is extremely important.
                 - Never make up file IDs — use only the IDs provided above
                 - If unsure whether to create or modify, ask the user (use TEXT type)
                 

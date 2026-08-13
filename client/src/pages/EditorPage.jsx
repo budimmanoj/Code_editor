@@ -354,7 +354,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       if (activeFileRef.current && activeFileRef.current.id === msg.fileId && msg.content !== undefined) {
         setCode(msg.content);
         setSavedCode(msg.content);
-        
+
         if (msg.initiatorId === user.id) {
           setYjsProvider(prev => {
             if (prev) {
@@ -378,7 +378,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
       if (activeFileRef.current && activeFileRef.current.id === msg.fileId && msg.content !== undefined) {
         setCode(msg.content);
         setSavedCode(msg.content);
-        
+
         if (msg.initiatorId === user.id) {
           setYjsProvider(prev => {
             if (prev) {
@@ -410,7 +410,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     try {
       const newTree = await api.getFileTree(roomId);
       setTree(newTree);
-      
+
       // Keep activeFile's version in sync with the new tree
       setActiveFile(prev => {
         if (!prev) return prev;
@@ -453,19 +453,19 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   useEffect(() => {
     if (viewCodeVersion && viewCodeVersion.fileNodeId) {
       let oldContent = '';
-      
+
       // Find all APPROVED versions for the exact same file
-      const approvedVersions = versions.filter(v => 
-        v.fileNodeId === viewCodeVersion.fileNodeId && 
+      const approvedVersions = versions.filter(v =>
+        v.fileNodeId === viewCodeVersion.fileNodeId &&
         v.status === 'APPROVED'
       );
 
       if (approvedVersions.length > 0) {
         // Sort chronologically descending (newest first)
         approvedVersions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        
+
         const selectedTime = new Date(viewCodeVersion.createdAt).getTime();
-        
+
         // Find the newest APPROVED version that was created BEFORE the selected version
         const previousApproved = approvedVersions.find(v => {
           const vTime = new Date(v.createdAt).getTime();
@@ -474,15 +474,15 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
         if (previousApproved && typeof previousApproved.content === 'string') {
           oldContent = previousApproved.content;
-        } else if (approvedVersions.length > 0 && typeof approvedVersions[approvedVersions.length - 1].content === 'string') {
-          // Fallback to the very first approved version if something goes wrong with timestamps
-          oldContent = approvedVersions[approvedVersions.length - 1].content;
+        } else {
+          // No previous approved version found, meaning this is the very first version
+          oldContent = '';
         }
       }
-      
+
       console.log(`[Diff Viewer] Selected: ${viewCodeVersion.id} (${viewCodeVersion.status})`);
       console.log(`[Diff Viewer] Baseline content type: ${typeof oldContent}, length: ${oldContent.length}`);
-      
+
       setViewCodeOldContent(oldContent);
     }
   }, [viewCodeVersion, versions]);
@@ -532,9 +532,25 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     }
 
     let isMounted = true;
-    api.getFile(roomId, activeFile.id).then(data => {
+    api.getFile(roomId, activeFile.id).then(async data => {
       if (!isMounted) return;
-      const content = typeof data === 'string' ? data : (data?.content || '');
+      let content = typeof data === 'string' ? data : (data?.content || '');
+
+      // If the canonical file is empty, fallback to the latest pending version
+      // This ensures that newly created files (especially by AI) don't appear blank.
+      if (!content) {
+        try {
+          const hist = await api.getHistory(roomId, 'FILE', activeFile.id);
+          if (hist && hist.length > 0 && hist[0].content) {
+            content = hist[0].content;
+          }
+        } catch (e) {
+          console.warn("Could not load history for empty file fallback", e);
+        }
+      }
+
+      if (!isMounted) return;
+
       setSavedCode(content);
 
       const draft = sessionStorage.getItem(`cr_code_${roomId}_${activeFile.id}`);
@@ -571,9 +587,16 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
     else sessionStorage.removeItem(`cr_file_${roomId}`);
   }, [activeFile, roomId]);
 
+  const codeFileRef = useRef(activeFile?.id);
   useEffect(() => {
-    if (code && activeFile) sessionStorage.setItem(`cr_code_${roomId}_${activeFile.id}`, code);
-    else if (activeFile) sessionStorage.removeItem(`cr_code_${roomId}_${activeFile.id}`);
+    if (activeFile) {
+      if (codeFileRef.current !== activeFile.id) {
+        codeFileRef.current = activeFile.id;
+      } else {
+        if (code) sessionStorage.setItem(`cr_code_${roomId}_${activeFile.id}`, code);
+        else sessionStorage.removeItem(`cr_code_${roomId}_${activeFile.id}`);
+      }
+    }
   }, [code, roomId, activeFile]);
 
   // ── File selection ─────────────────────────────────────────────────────────
@@ -640,16 +663,17 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
   useEffect(() => {
     if (!activeFile) return;
     if (code === savedCode) return; // No unsaved changes
-    if (saveMsg === 'Saving...') return; // Prevent loop
 
     setSaveMsg('Unsaved');
 
     const handler = setTimeout(() => {
-      reviewAndSave(true);
+      if (!saving) {
+        reviewAndSave(true);
+      }
     }, 30000);
 
     return () => clearTimeout(handler);
-  }, [code, savedCode, activeFile, reviewAndSave, saveMsg]);
+  }, [code, savedCode, activeFile, reviewAndSave, saving]);
 
   // ── Versions ───────────────────────────────────────────────────────────────
 
@@ -1084,6 +1108,7 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
                 newValue={viewCodeVersion.content}
                 splitView={true}
                 useDarkTheme={false}
+                showDiffOnly={false}
                 leftTitle={viewCodeVersion.status === 'PENDING' ? 'Current Approved' : 'Previous Version'}
                 rightTitle={viewCodeVersion.status === 'PENDING' ? 'Proposed Changes' : `Version ${viewCodeVersion.id.substring(0, 8)}`}
               />
@@ -1145,10 +1170,10 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
           {saveMsg === 'Saving...' && <span className="save-badge saved">● Saving...</span>}
           {saveMsg === 'Saved ✓' && <span className="save-badge saved">✓ Saved</span>}
           {saveMsg === 'Save failed — Retry' && (
-            <span 
-              className="save-badge error-badge" 
-              onClick={() => reviewAndSaveRef.current?.()} 
-              style={{cursor: 'pointer'}}
+            <span
+              className="save-badge error-badge"
+              onClick={() => reviewAndSaveRef.current?.()}
+              style={{ cursor: 'pointer' }}
               title="Click to retry saving"
             >
               ✗ Save failed — Retry
@@ -1454,11 +1479,11 @@ export default function EditorPage({ user, roomId, roomName, userRole, onLeave }
 
                   // Filter and map
                   let filtered = sorted;
-                  
+
                   if (filterStatus !== 'ALL') {
                     filtered = filtered.filter(v => v.status === filterStatus);
                   }
-                  
+
                   if (filterAuthor !== 'ALL') {
                     filtered = filtered.filter(v => {
                       const participant = participants.find(p => p.userId === v.userId);

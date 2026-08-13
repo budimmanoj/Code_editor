@@ -62,8 +62,12 @@ export class CodeRoomYjsProvider {
           Y.applyUpdate(this.doc, update);
         });
       }, 'remote');
-    } else if (this.initialContent && this.ytext.toString() === '') {
-      this.ytext.insert(0, this.initialContent);
+    }
+
+    if (this.initialContent && this.ytext.toString() === '') {
+      this.doc.transact(() => {
+        this.ytext.insert(0, this.initialContent);
+      });
     }
   }
 

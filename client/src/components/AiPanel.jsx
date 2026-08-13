@@ -68,8 +68,8 @@ function CreateFileCard({ action, roomId, onConfirm, onCancel }) {
         {action.language && <span className="ai-lang-badge">{action.language}</span>}
       </div>
       {action.content && (
-        <pre className="ai-action-preview">
-          {action.content.substring(0, 500)}{action.content.length > 500 ? '\n...' : ''}
+        <pre className="ai-action-preview" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          {action.content}
         </pre>
       )}
       {!done ? (
@@ -125,8 +125,8 @@ function UpdateFileCard({ action, currentCode, roomId, onConfirm, onCancel, onIn
       </button>
 
       {showDiff && (
-        <pre className="ai-action-preview ai-diff-view">
-          {newContent.substring(0, 800)}{newContent.length > 800 ? '\n...' : ''}
+        <pre className="ai-action-preview ai-diff-view" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          {newContent}
         </pre>
       )}
 
